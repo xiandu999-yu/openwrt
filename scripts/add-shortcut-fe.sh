@@ -1,59 +1,24 @@
 #!/bin/bash
 
-echo "=== 从 LEDE 添加 Shortcut FE 支持 ==="
+echo "=== 直接从 LEDE 下载 Shortcut FE 包 ==="
 
-# 切换到 package 目录
-cd package
+# 基础 URL
+BASE_URL="https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/qca/shortcut-fe"
 
-# 直接从 LEDE 仓库克隆 shortcut-fe 包
-echo "从 LEDE 仓库克隆 shortcut-fe..."
-if [ ! -d "qca" ]; then
-    mkdir qca
-fi
+# 创建目录结构
+mkdir -p package/qca/shortcut-fe
+cd package/qca/shortcut-fe
 
-cd qca
+echo "下载 shortcut-fe 组件..."
 
-# 克隆整个 shortcut-fe 目录
-if [ ! -d "shortcut-fe" ]; then
-    echo "克隆 shortcut-fe 仓库..."
-    # 使用 sparse checkout 只下载 shortcut-fe 相关文件
-    git init shortcut-fe
-    cd shortcut-fe
-    git remote add origin https://github.com/coolsnowwolf/lede.git
-    git config core.sparsecheckout true
-    echo "package/qca/shortcut-fe/*" >> .git/info/sparse-checkout
-    git pull --depth=1 origin master
-    
-    # 移动文件到正确位置
-    if [ -d "package/qca/shortcut-fe" ]; then
-        mv package/qca/shortcut-fe/* .
-        rm -rf package
-        echo "✅ shortcut-fe 文件移动完成"
-    else
-        echo "❌ 文件结构不符合预期，使用备用方案"
-        # 备用方案：手动创建文件结构
-        cd ..
-        rm -rf shortcut-fe
-        create_shortcut_fe_manually
-    fi
+# 1. 下载 fast-classifier
+echo "下载 fast-classifier..."
+mkdir -p fast-classifier
+curl -sSL "$BASE_URL/fast-classifier/Makefile" -o fast-classifier/Makefile
+if [ $? -eq 0 ]; then
+    echo "✅ fast-classifier/Makefile 下载成功"
 else
-    echo "✅ shortcut-fe 目录已存在"
-fi
-
-cd ../..
-
-echo "✅ Shortcut FE 支持添加完成"
-
-# 备用方案：手动创建 shortcut-fe 结构
-create_shortcut_fe_manually() {
-    echo "使用备用方案创建 shortcut-fe..."
-    mkdir -p shortcut-fe
-    cd shortcut-fe
-    
-    # 创建三个组件的目录
-    mkdir -p fast-classifier shortcut-fe simulated-driver
-    
-    # 创建 fast-classifier Makefile
+    echo "❌ 下载失败，使用备用方案"
     cat > fast-classifier/Makefile << 'EOF'
 include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
@@ -92,8 +57,16 @@ endef
 
 $(eval $(call KernelPackage,fast-classifier))
 EOF
+fi
 
-    # 创建 shortcut-fe Makefile
+# 2. 下载 shortcut-fe
+echo "下载 shortcut-fe..."
+mkdir -p shortcut-fe
+curl -sSL "$BASE_URL/shortcut-fe/Makefile" -o shortcut-fe/Makefile
+if [ $? -eq 0 ]; then
+    echo "✅ shortcut-fe/Makefile 下载成功"
+else
+    echo "❌ 下载失败，使用备用方案"
     cat > shortcut-fe/Makefile << 'EOF'
 include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
@@ -132,8 +105,16 @@ endef
 
 $(eval $(call KernelPackage,shortcut-fe))
 EOF
+fi
 
-    # 创建 simulated-driver Makefile
+# 3. 下载 simulated-driver
+echo "下载 simulated-driver..."
+mkdir -p simulated-driver
+curl -sSL "$BASE_URL/simulated-driver/Makefile" -o simulated-driver/Makefile
+if [ $? -eq 0 ]; then
+    echo "✅ simulated-driver/Makefile 下载成功"
+else
+    echo "❌ 下载失败，使用备用方案"
     cat > simulated-driver/Makefile << 'EOF'
 include $(TOPDIR)/rules.mk
 include $(INCLUDE_DIR)/kernel.mk
@@ -172,6 +153,19 @@ endef
 
 $(eval $(call KernelPackage,shortcut-fe-drv))
 EOF
+fi
 
-    echo "✅ 手动创建 shortcut-fe 完成"
-}
+# 创建 src 目录（根据截图信息）
+echo "创建 src 目录..."
+mkdir -p fast-classifier/src
+mkdir -p shortcut-fe/src
+
+# 创建占位文件
+echo "// Source files will be downloaded during build" > fast-classifier/src/placeholder.c
+echo "// Source files will be downloaded during build" > shortcut-fe/src/placeholder.c
+
+cd ../../..
+
+echo "✅ Shortcut FE 包下载完成"
+echo "目录结构:"
+find package/qca/shortcut-fe -type f | sort
