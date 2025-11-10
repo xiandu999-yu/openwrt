@@ -1,6 +1,17 @@
 #!/bin/bash
 
-set -e
+set -e  # 遇到错误立即退出
+
+# 错误处理函数
+error_handler() {
+    echo "❌ 脚本执行失败 at line $1"
+    exit 1
+}
+
+trap 'error_handler $LINENO' ERR
+
+# 设置超时
+TIMEOUT=1800  # 30分钟超时
 
 echo "=== 开始集成TurboACC和Fullcone NAT功能 ==="
 
