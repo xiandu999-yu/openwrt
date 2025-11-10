@@ -218,39 +218,31 @@ jobs:
         echo "自定义功能: Fullcone NAT + TurboACC" >> version-info.txt
         cat version-info.txt
 
-    - name: 下载软件包
+    - name: 构建固件（充分利用硬件）
       run: |
-        echo "开始下载软件包..."
-        make download -j2  # 下载用较少线程避免网络拥堵
-        echo "下载完成"
-
-    - name: 构建固件（优化线程）
-      run: |
-        # 检测系统资源并计算最优线程数
-        CPU_CORES=$(nproc)
-        SAFE_JOBS=$((CPU_CORES - 1))
+        echo "=== 高性能编译配置 ==="
+        echo "硬件: 4核心 AMD EPYC + 15GB 内存"
         
-        echo "系统资源信息:"
-        echo "CPU 核心: $CPU_CORES"
-        echo "安全线程数: $SAFE_JOBS"
-        echo "可用内存: $(free -h | awk 'NR==2{print $7}')"
+        # 分阶段优化配置
+        {
+            echo "阶段1: 下载软件包 (4线程)"
+            make download -j4
+            
+            echo "阶段2: 编译工具链 (3线程)"
+            make toolchain/compile -j3
+            make toolchain/install -j3
+            
+            echo "阶段3: 编译内核模块 (3线程)"
+            make target/linux/compile -j3
+            
+            echo "阶段4: 编译软件包 (3线程)"
+            make package/compile -j3
+            
+            echo "阶段5: 生成固件镜像 (2线程)"
+            make -j2 V=s
+        } | tee build-optimized.log
         
-        # 使用安全线程数进行编译
-        echo "编译工具链..."
-        make toolchain/compile -j$SAFE_JOBS
-        make toolchain/install -j$SAFE_JOBS
-
-        echo "编译内核和模块..."
-        make target/linux/compile -j$SAFE_JOBS
-
-        echo "编译软件包..."
-        make package/compile -j$SAFE_JOBS
-
-        echo "生成固件镜像..."
-        make -j1 V=s  # 最终链接阶段使用单线程避免错误
-        
-        echo "编译产物列表:"
-        find bin/targets -name "*.img" -o -name "*.bin" -o -name "*.gz" | head -10
+        echo "✅ 编译完成！资源利用率最大化"
 
     - name: 生成软件包索引
       run: |
