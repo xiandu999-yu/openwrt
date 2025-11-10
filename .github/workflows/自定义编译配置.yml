@@ -7,7 +7,7 @@ on:
     branches: [ main ]
   workflow_dispatch:
     inputs:
-      目标设备:
+      target_device:  # 目标设备
         description: '选择编译目标设备'
         required: true
         default: 'nanopi-r3s'
@@ -15,12 +15,12 @@ on:
         options:
           - nanopi-r3s
           - nanopi-r6s
-      包含SFE加速:
+      include_sfe:  # 包含SFE加速
         description: '是否包含Shortcut FE加速'
         type: boolean
         required: false
         default: false
-      TurboACC功能:
+      turboacc_feature:  # TurboACC功能
         description: '选择TurboACC功能配置'
         type: choice
         required: false
@@ -30,10 +30,10 @@ on:
           - with-sfe
 
 env:
-  超时时间: 180m
+  TIMEOUT: 180m
 
 jobs:
-  编译:
+  build:  # 编译
     runs-on: ubuntu-latest
     timeout-minutes: 180  # 3小时超时
     
@@ -96,7 +96,7 @@ jobs:
         ./scripts/apply-custom-patches.sh
         
         echo "集成TurboACC功能..."
-        if [ "${{ github.event.inputs.TurboACC功能 }}" = "with-sfe" ]; then
+        if [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
           echo "包含SFE加速"
           ./scripts/integrate-features.sh --with-sfe
         else
@@ -115,7 +115,7 @@ jobs:
     - name: 配置编译参数
       run: |
         # 复制基础配置
-        if [ "${{ github.event.inputs.目标设备 }}" = "nanopi-r3s" ]; then
+        if [ "${{ github.event.inputs.target_device }}" = "nanopi-r3s" ]; then
           cp configs/nanopi-r3s.config .config
           echo "选择NanoPi R3S配置"
         else
@@ -138,7 +138,7 @@ jobs:
         echo "CONFIG_LUCI_LANG_zh-cn=y" >> .config
         
         # 根据参数调整配置
-        if [ "${{ github.event.inputs.包含SFE加速 }}" = "true" ] || [ "${{ github.event.inputs.TurboACC功能 }}" = "with-sfe" ]; then
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ] || [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
           echo "启用Shortcut FE..."
           echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
           echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=y" >> .config
@@ -152,17 +152,17 @@ jobs:
 
     - name: 生成版本信息
       run: |
-        echo "=== 固件版本信息 ===" > 版本信息.txt
-        echo "基础版本: OpenWrt SNAPSHOT (开发版)" >> 版本信息.txt
-        echo "内核版本: 6.12" >> 版本信息.txt
-        echo "包管理器: apk" >> 版本信息.txt
-        echo "编译时间: $(date '+%Y-%m-%d %H:%M:%S')" >> 版本信息.txt
-        echo "目标设备: ${{ github.event.inputs.目标设备 }}" >> 版本信息.txt
-        echo "TurboACC功能: ${{ github.event.inputs.TurboACC功能 }}" >> 版本信息.txt
-        echo "包含SFE: ${{ github.event.inputs.包含SFE加速 }}" >> 版本信息.txt
-        echo "Git提交: $(git log -1 --format=%h)" >> 版本信息.txt
-        echo "自定义功能: Fullcone NAT + TurboACC" >> 版本信息.txt
-        cat 版本信息.txt
+        echo "=== 固件版本信息 ===" > version-info.txt
+        echo "基础版本: OpenWrt SNAPSHOT (开发版)" >> version-info.txt
+        echo "内核版本: 6.12" >> version-info.txt
+        echo "包管理器: apk" >> version-info.txt
+        echo "编译时间: $(date '+%Y-%m-%d %H:%M:%S')" >> version-info.txt
+        echo "目标设备: ${{ github.event.inputs.target_device }}" >> version-info.txt
+        echo "TurboACC功能: ${{ github.event.inputs.turboacc_feature }}" >> version-info.txt
+        echo "包含SFE: ${{ github.event.inputs.include_sfe }}" >> version-info.txt
+        echo "Git提交: $(git log -1 --format=%h)" >> version-info.txt
+        echo "自定义功能: Fullcone NAT + TurboACC" >> version-info.txt
+        cat version-info.txt
 
     - name: 下载软件包
       run: |
@@ -203,16 +203,16 @@ jobs:
     - name: 上传固件镜像
       uses: actions/upload-artifact@v4
       with:
-        name: 固件-${{ github.event.inputs.目标设备 }}-${{ github.event.inputs.TurboACC功能 }}
+        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}
         path: |
           bin/targets/
-          版本信息.txt
+          version-info.txt
         retention-days: 30
 
     - name: 上传软件包
       uses: actions/upload-artifact@v4
       with:
-        name: 软件包-${{ github.event.inputs.目标设备 }}
+        name: packages-${{ github.event.inputs.target_device }}
         path: |
           bin/packages/
         retention-days: 30
@@ -221,7 +221,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: 构建日志-${{ github.event.inputs.目标设备 }}
+        name: build-log-${{ github.event.inputs.target_device }}
         path: |
           build.log
           .config
