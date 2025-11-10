@@ -140,7 +140,6 @@ jobs:
 
     - name: 配置编译参数
       run: |
-        # 复制基础配置
         if [ "${{ github.event.inputs.target_device }}" = "nanopi-r3s" ]; then
           cp configs/nanopi-r3s.config .config
           echo "选择NanoPi R3S配置"
@@ -149,30 +148,37 @@ jobs:
           echo "选择NanoPi R6S配置"
         fi
         
-        # 启用所有内核模块（但独立编译）
+        # 内核模块配置
         echo "CONFIG_ALL_KMODS=y" >> .config
         echo "CONFIG_ALL_NONSHARED=n" >> .config
         
         # 启用APK包管理
         echo "CONFIG_USE_APK=y" >> .config
         
-        # 启用Luci界面
+        # 基础系统
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-base=y" >> .config
         echo "CONFIG_PACKAGE_luci-compat=y" >> .config
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
         echo "CONFIG_LUCI_LANG_zh-cn=y" >> .config
         
-        # 根据参数调整配置
-        if [ "${{ github.event.inputs.include_sfe }}" = "true" ] || [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
-          echo "启用Shortcut FE..."
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=y" >> .config
-        fi
-        
-        # 确保启用TurboACC
+        # TurboACC核心功能
         echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
         echo "CONFIG_PACKAGE_nft-fullcone=y" >> .config
+        
+        # 根据参数调整配置
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ] || [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
+          echo "启用完整的 Shortcut FE..."
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
+        fi
+        
+        # 系统工具
+        echo "CONFIG_PACKAGE_curl=y" >> .config
+        echo "CONFIG_PACKAGE_bash=y" >> .config
+        echo "CONFIG_PACKAGE_htop=y" >> .config
+        echo "CONFIG_PACKAGE_nano=y" >> .config
         
         make defconfig
 
