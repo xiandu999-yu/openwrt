@@ -95,6 +95,9 @@ jobs:
         echo "应用基础补丁..."
         ./scripts/apply-custom-patches.sh
         
+        echo "修复依赖关系警告..."
+        ./scripts/fix-dependencies.sh
+        
         echo "集成TurboACC功能..."
         if [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
           echo "包含SFE加速"
