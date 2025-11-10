@@ -126,6 +126,8 @@ jobs:
         if [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
           echo "包含SFE加速 - 使用官方脚本自动处理依赖"
           curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash
+          echo "添加完整的 Shortcut FE 支持..."
+          ./scripts/add-shortcut-fe.sh
         else
           echo "仅Fullcone NAT - 使用官方脚本自动处理依赖"  
           curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash -s -- --no-sfe
