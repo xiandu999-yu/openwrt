@@ -1,19 +1,19 @@
 #!/bin/bash
 
-echo "Applying custom patches..."
+echo "Applying custom patches and features..."
 
 # 修改默认IP地址
 sed -i 's/192.168.1.1/192.168.20.1/g' package/base-files/files/bin/config_generate
 
-# 添加TurboACC (Fullcone NAT)
-echo "Adding TurboACC..."
-curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
-bash add_troboacc.sh --no-sfe
+# 集成TurboACC和Fullcone NAT（不带SFE）
+echo "Integrating TurboACC and Fullcone NAT..."
+chmod +x scripts/integrate-features.sh
+./scripts/integrate-features.sh --with-sfe  # 如果需要SFE，使用这个
+# ./scripts/integrate-features.sh           # 如果不需要SFE，使用这个
 
-# 应用Fullcone NAT补丁
-if [ -d "patches" ]; then
-    for patch in patches/*.patch; do
-        echo "Applying patch: $patch"
-        patch -p1 < "$patch"
-    done
+# 应用Fullcone补丁
+if [ -f "scripts/apply-fullcone-patches.sh" ]; then
+    ./scripts/apply-fullcone-patches.sh
 fi
+
+echo "Custom patches applied successfully"
