@@ -150,6 +150,9 @@ jobs:
         # 启用APK包管理
         echo "CONFIG_USE_APK=y" >> .config
         
+        # 修复 Python 依赖警告
+        echo "CONFIG_PACKAGE_python3-distutils=m" >> .config
+        
         # 基础系统
         echo "CONFIG_PACKAGE_luci=y" >> .config
         echo "CONFIG_PACKAGE_luci-base=y" >> .config
