@@ -190,7 +190,7 @@ jobs:
         # 修复 Python 依赖
         echo "CONFIG_PACKAGE_python3=y" >> .config
         echo "CONFIG_PACKAGE_python3-light=y" >> .config
-        echo "CONFIG_PACKAGE_python3-distutils=m" >> .config
+        echo "CONFIG_PACKAGE_python3-distutils=y" >> .config  # 改为y确保编译
         
         # Lua 支持
         echo "CONFIG_PACKAGE_lua=y" >> .config
@@ -216,6 +216,21 @@ jobs:
         # Argon 主题（可选）
         echo "CONFIG_PACKAGE_luci-theme-argon=m" >> .config
         echo "CONFIG_PACKAGE_luci-app-argon-config=m" >> .config
+        
+        # coreutils 相关工具
+        echo "CONFIG_PACKAGE_coreutils=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-sort=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-od=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-stat=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-tee=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-mktemp=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-chroot=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-sha1sum=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-sleep=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-date=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-timeout=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-dirname=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-stty=m" >> .config
         
         # 基础网络工具
         echo "CONFIG_PACKAGE_iptables=m" >> .config
@@ -254,8 +269,6 @@ jobs:
         echo "CONFIG_PACKAGE_git-http=m" >> .config
         echo "CONFIG_PACKAGE_parted=m" >> .config
         echo "CONFIG_PACKAGE_smartmontools=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-stty=m" >> .config
         
         # 网络诊断工具
         echo "CONFIG_PACKAGE_iperf3=m" >> .config
@@ -263,49 +276,6 @@ jobs:
         echo "CONFIG_PACKAGE_wget=m" >> .config
         echo "CONFIG_PACKAGE_iputils-ping=m" >> .config
         echo "CONFIG_PACKAGE_iputils-traceroute=m" >> .config
-        
-        # routing 相关包 - 模块化
-        echo "CONFIG_PACKAGE_batman-adv=m" >> .config
-        echo "CONFIG_PACKAGE_quagga=m" >> .config
-        echo "CONFIG_PACKAGE_babeld=m" >> .config
-        echo "CONFIG_PACKAGE_olsrd=m" >> .config
-        echo "CONFIG_PACKAGE_bmxd=m" >> .config
-        
-        # 无线驱动 - 模块化
-        echo "CONFIG_PACKAGE_kmod-mt76=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-mt76x2u=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-mt7603=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-mt7615e=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-mt7615-firmware=m" >> .config
-        
-        # 虚拟化支持 - 模块化
-        echo "CONFIG_PACKAGE_kmod-kvm=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-tun=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-veth=m" >> .config
-        
-        # 文件系统支持 - 模块化
-        echo "CONFIG_PACKAGE_kmod-fs-9p=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-autofs4=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-btrfs=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-cifs=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-exfat=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-ext4=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-f2fs=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-nfs=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-nfs-common=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-nfsd=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-ntfs=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-squashfs=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-xfs=m" >> .config
-        
-        # USB 支持 - 模块化
-        echo "CONFIG_PACKAGE_kmod-usb-core=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-ohci=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-uhci=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-storage=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-storage-uas=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb2=m" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb3=m" >> .config
         
         # 禁用有问题的包
         echo "CONFIG_PACKAGE_rtpengine=n" >> .config
