@@ -95,13 +95,18 @@ jobs:
         echo "应用基础补丁..."
         ./scripts/apply-custom-patches.sh
         
-        echo "修复依赖关系警告..."
+        echo "修复依赖关系..."
         ./scripts/fix-dependencies.sh
+        
+        echo "修复 libnftnl 编译问题..."
+        ./scripts/fix-libnftnl.sh
         
         echo "集成TurboACC功能..."
         if [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
           echo "包含SFE加速"
           ./scripts/integrate-features.sh --with-sfe
+          echo "添加 Shortcut FE 支持..."
+          ./scripts/add-shortcut-fe.sh
         else
           echo "仅Fullcone NAT"
           ./scripts/integrate-features.sh
@@ -109,6 +114,24 @@ jobs:
         
         echo "添加软件包..."
         ./scripts/add-packages.sh
+
+    - name: 检查编译环境
+      run: |
+        echo "检查关键包状态..."
+        # 检查 libnftnl
+        if [ -d "package/libs/libnftnl" ]; then
+            echo "✅ libnftnl 存在"
+            ls package/libs/libnftnl/patches/ 2>/dev/null || echo "无补丁"
+        else
+            echo "❌ libnftnl 不存在"
+        fi
+        
+        # 检查 shortcut-fe
+        if [ -f "package/network/shortcut-fe/Makefile" ]; then
+            echo "✅ shortcut-fe 存在"
+        else
+            echo "⚠️ shortcut-fe 不存在"
+        fi
 
     - name: 更新软件源
       run: |
