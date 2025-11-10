@@ -170,12 +170,7 @@ jobs:
           echo "选择NanoPi R6S配置"
         fi
         
-        # 禁用有问题的包
-        echo "CONFIG_PACKAGE_rtpengine=n" >> .config
-        echo "CONFIG_PACKAGE_rtpengine-full=n" >> .config
-        echo "CONFIG_PACKAGE_rtpengine-no-transcode=n" >> .config
-        
-        # 内核模块配置
+        # 内核模块配置 - 启用所有kmods
         echo "CONFIG_ALL_KMODS=y" >> .config
         echo "CONFIG_ALL_NONSHARED=n" >> .config
         
@@ -185,30 +180,108 @@ jobs:
         # 修复 Python 依赖警告
         echo "CONFIG_PACKAGE_python3-distutils=m" >> .config
         
-        # 基础系统
-        echo "CONFIG_PACKAGE_luci=y" >> .config
-        echo "CONFIG_PACKAGE_luci-base=y" >> .config
-        echo "CONFIG_PACKAGE_luci-compat=y" >> .config
-        echo "CONFIG_PACKAGE_luci-theme-bootstrap=y" >> .config
-        echo "CONFIG_LUCI_LANG_zh-cn=y" >> .config
+        # 基础系统 - 最小化内置
+        echo "CONFIG_PACKAGE_luci=m" >> .config
+        echo "CONFIG_PACKAGE_luci-base=m" >> .config
+        echo "CONFIG_PACKAGE_luci-compat=m" >> .config
+        echo "CONFIG_PACKAGE_luci-theme-bootstrap=m" >> .config
+        echo "CONFIG_LUCI_LANG_zh-cn=m" >> .config
         
-        # TurboACC核心功能
-        echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
-        echo "CONFIG_PACKAGE_nft-fullcone=y" >> .config
+        # 基础网络工具 - 模块化
+        echo "CONFIG_PACKAGE_iptables=m" >> .config
+        echo "CONFIG_PACKAGE_iptables-mod-conntrack-extra=m" >> .config
+        echo "CONFIG_PACKAGE_iptables-mod-ipopt=m" >> .config
+        echo "CONFIG_PACKAGE_iptables-mod-nat-extra=m" >> .config
+        echo "CONFIG_PACKAGE_iptables-mod-tproxy=m" >> .config
+        echo "CONFIG_PACKAGE_iptables-mod-extra=m" >> .config
+        echo "CONFIG_PACKAGE_ip6tables=m" >> .config
+        echo "CONFIG_PACKAGE_ip6tables-mod-nat=m" >> .config
+        
+        # 防火墙 - 模块化
+        echo "CONFIG_PACKAGE_firewall=m" >> .config
+        echo "CONFIG_PACKAGE_firewall4=m" >> .config
+        
+        # TurboACC核心功能 - 模块化
+        echo "CONFIG_PACKAGE_luci-app-turboacc=m" >> .config
+        echo "CONFIG_PACKAGE_nft-fullcone=m" >> .config
         
         # 根据参数调整配置
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ] || [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
           echo "启用完整的 Shortcut FE..."
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe=m" >> .config
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=m" >> .config
+          echo "CONFIG_PACKAGE_kmod-fast-classifier=m" >> .config
         fi
         
-        # 系统工具
-        echo "CONFIG_PACKAGE_curl=y" >> .config
-        echo "CONFIG_PACKAGE_bash=y" >> .config
-        echo "CONFIG_PACKAGE_htop=y" >> .config
-        echo "CONFIG_PACKAGE_nano=y" >> .config
+        # 系统工具 - 模块化
+        echo "CONFIG_PACKAGE_curl=m" >> .config
+        echo "CONFIG_PACKAGE_bash=m" >> .config
+        echo "CONFIG_PACKAGE_htop=m" >> .config
+        echo "CONFIG_PACKAGE_nano=m" >> .config
+        echo "CONFIG_PACKAGE_vim=m" >> .config
+        echo "CONFIG_PACKAGE_git=m" >> .config
+        echo "CONFIG_PACKAGE_git-http=m" >> .config
+        
+        # 网络诊断工具 - 模块化
+        echo "CONFIG_PACKAGE_iperf3=m" >> .config
+        echo "CONFIG_PACKAGE_tcpdump=m" >> .config
+        echo "CONFIG_PACKAGE_curl=m" >> .config
+        echo "CONFIG_PACKAGE_wget=m" >> .config
+        echo "CONFIG_PACKAGE_iputils-ping=m" >> .config
+        echo "CONFIG_PACKAGE_iputils-traceroute=m" >> .config
+        
+        # routing 相关包 - 模块化
+        echo "CONFIG_PACKAGE_batman-adv=m" >> .config
+        echo "CONFIG_PACKAGE_quagga=m" >> .config
+        echo "CONFIG_PACKAGE_babeld=m" >> .config
+        echo "CONFIG_PACKAGE_olsrd=m" >> .config
+        echo "CONFIG_PACKAGE_bmxd=m" >> .config
+        
+        # 无线驱动 - 模块化
+        echo "CONFIG_PACKAGE_kmod-mt76=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-mt76x2u=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-mt7603=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-mt7615e=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-mt7615-firmware=m" >> .config
+        
+        # 虚拟化支持 - 模块化
+        echo "CONFIG_PACKAGE_kmod-kvm=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-tun=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-veth=m" >> .config
+        
+        # 文件系统支持 - 模块化
+        echo "CONFIG_PACKAGE_kmod-fs-9p=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-autofs4=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-btrfs=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-cifs=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-exfat=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-ext4=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-f2fs=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-nfs=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-nfs-common=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-nfsd=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-ntfs=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-squashfs=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-xfs=m" >> .config
+        
+        # USB 支持 - 模块化
+        echo "CONFIG_PACKAGE_kmod-usb-core=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-ohci=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-uhci=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-storage=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb-storage-uas=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb2=m" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb3=m" >> .config
+        
+        # 仅内置最基础的系统组件
+        echo "CONFIG_PACKAGE_base-files=y" >> .config
+        echo "CONFIG_PACKAGE_busybox=y" >> .config
+        echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
+        echo "CONFIG_PACKAGE_dropbear=y" >> .config
+        echo "CONFIG_PACKAGE_opkg=y" >> .config
+        echo "CONFIG_PACKAGE_procd=y" >> .config
+        echo "CONFIG_PACKAGE_uci=y" >> .config
+        echo "CONFIG_PACKAGE_urandom-seed=y" >> .config
         
         make defconfig
 
@@ -224,6 +297,7 @@ jobs:
         echo "包含SFE: ${{ github.event.inputs.include_sfe }}" >> version-info.txt
         echo "Git提交: $(git log -1 --format=%h)" >> version-info.txt
         echo "自定义功能: Fullcone NAT + TurboACC" >> version-info.txt
+        echo "编译策略: 全kmods + 模块化插件" >> version-info.txt
         cat version-info.txt
 
     - name: 构建固件（充分利用硬件）
