@@ -1,0 +1,39 @@
+name: 快速测试
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+jobs:
+  test-prereq:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          python3 \
+          python3-pip \
+          git
+        
+        pip3 install pyelftools cffi
+
+    - name: Check prerequisites
+      run: |
+        chmod +x scripts/check-prerequisites.sh
+        ./scripts/check-prerequisites.sh
+
+    - name: Test OpenWrt prereq
+      run: |
+        echo "测试OpenWrt前提条件..."
+        make prereq 2>&1 | tail -20
+        echo "✅ 前提条件测试完成"
