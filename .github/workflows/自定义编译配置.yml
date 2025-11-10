@@ -148,11 +148,15 @@ jobs:
             echo "❌ libnftnl 不存在"
         fi
         
-        # 检查 shortcut-fe
-        if [ -f "package/network/shortcut-fe/Makefile" ]; then
-            echo "✅ shortcut-fe 存在"
+        # 检查 shortcut-fe (新路径)
+        if [ -d "package/qca/shortcut-fe" ]; then
+            echo "✅ shortcut-fe 存在 (qca 路径)"
+            ls package/qca/shortcut-fe/ 2>/dev/null || echo "目录为空"
+        elif [ -d "package/network/shortcut-fe" ]; then
+            echo "✅ shortcut-fe 存在 (network 路径)"
+            ls package/network/shortcut-fe/ 2>/dev/null || echo "目录为空"
         else
-            echo "⚠️ shortcut-fe 不存在"
+            echo "❌ shortcut-fe 不存在"
         fi
         
         # 检查 iStore 相关包
@@ -253,9 +257,10 @@ jobs:
         # 根据参数调整配置
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ] || [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
           echo "启用完整的 Shortcut FE..."
+          # 使用正确的包路径
           echo "CONFIG_PACKAGE_kmod-shortcut-fe=m" >> .config
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=m" >> .config
           echo "CONFIG_PACKAGE_kmod-fast-classifier=m" >> .config
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=m" >> .config
         fi
         
         # 系统工具
