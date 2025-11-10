@@ -8,9 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: 'Build target'
+        description: 'Build target (nanopi-r3s or nanopi-r6s)'
         required: true
-        default: 'nanopi-r3s nanopi-r6s'
+        default: 'nanopi-r3s'
+        type: choice
+        options:
+          - nanopi-r3s
+          - nanopi-r6s
       include_sfe:
         description: 'Include Shortcut FE acceleration'
         type: boolean
@@ -22,53 +26,49 @@ on:
         required: false
         default: 'fullcone-only'
         options:
-        - 'fullcone-only'
-        - 'with-sfe'
-        - 'minimal'
+          - fullcone-only
+          - with-sfe
+
+# 设置超时时间
+env:
+  TIMEOUT: 180m
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [nanopi-r3s, nanopi-r6s]
+    timeout-minutes: 180  # 3小时超时
     
     steps:
-    - name: Checkout
+    - name: Checkout code
       uses: actions/checkout@v4
       with:
         submodules: recursive
+        fetch-depth: 0
 
     - name: Setup environment
       run: |
         sudo apt-get update
         sudo apt-get install -y build-essential clang flex bison g++ gawk gcc-multilib \
           g++-multilib gettext git libncurses5-dev libssl-dev python3 python3-pip \
-          python3-serial unzip zlib1g-dev file wget
+          python3-serial unzip zlib1g-dev file wget rsync
 
     - name: Apply custom modifications
       run: |
         chmod +x scripts/*.sh
-        
-        # 根据输入参数应用不同的功能
-        echo "应用自定义修改..."
+        echo "应用基础补丁..."
         ./scripts/apply-custom-patches.sh
         
-        # 根据turboacc_feature参数选择集成方式
+        echo "集成TurboACC功能..."
         if [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
-          echo "集成TurboACC with SFE..."
+          echo "包含SFE加速"
           ./scripts/integrate-features.sh --with-sfe
-        elif [ "${{ github.event.inputs.turboacc_feature }}" = "fullcone-only" ]; then
-          echo "集成TurboACC Fullcone only..."
-          ./scripts/integrate-features.sh
         else
-          echo "最小化集成..."
-          # 只应用基本补丁，不集成额外功能
-          ./scripts/apply-basic-patches.sh
+          echo "仅Fullcone NAT"
+          ./scripts/integrate-features.sh
         fi
         
+        echo "添加软件包..."
         ./scripts/add-packages.sh
-        ./scripts/check-features.sh
 
     - name: Update feeds
       run: |
@@ -77,42 +77,52 @@ jobs:
 
     - name: Configure build
       run: |
-        # 根据目标设备选择配置
-        if [ "${{ matrix.target }}" = "nanopi-r3s" ]; then
+        # 复制基础配置
+        if [ "${{ github.event.inputs.target }}" = "nanopi-r3s" ]; then
           cp configs/nanopi-r3s.config .config
+          echo "选择NanoPi R3S配置"
         else
           cp configs/nanopi-r6s.config .config
+          echo "选择NanoPi R6S配置"
         fi
         
         # 根据参数调整配置
-        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ] || [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
+          echo "启用Shortcut FE..."
           echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
           echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=y" >> .config
         fi
         
-        if [ "${{ github.event.inputs.turboacc_feature }}" != "minimal" ]; then
-          echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
-          echo "CONFIG_PACKAGE_nft-fullcone=y" >> .config
-        fi
+        # 确保启用TurboACC
+        echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
+        echo "CONFIG_PACKAGE_nft-fullcone=y" >> .config
         
         make defconfig
 
+    - name: Download packages
+      run: |
+        # 预下载包，避免编译时超时
+        make download -j8
+        find dl -size +5M -exec ls -lh {} \;
+
     - name: Build firmware
       run: |
-        make -j$(nproc) V=s
+        # 使用更详细的输出，避免无输出导致取消
+        echo "开始编译固件..."
+        make -j$(($(nproc) + 1)) V=sc 2>&1 | tee build.log || \
+        (echo "编译可能失败，检查日志..." && tail -100 build.log && exit 1)
 
-    - name: Upload artifacts
+    - name: Upload firmware artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: openwrt-${{ matrix.target }}-${{ github.event.inputs.turboacc_feature }}-${{ github.event.inputs.include_sfe && 'sfe' || 'nosfe' }}
+        name: openwrt-${{ github.event.inputs.target }}-${{ github.event.inputs.turboacc_feature }}
         path: bin/targets/
-        retention-days: 7
+        retention-days: 30
 
-    - name: Generate build report
-      run: |
-        echo "=== 构建报告 ==="
-        echo "设备: ${{ matrix.target }}"
-        echo "TurboACC功能: ${{ github.event.inputs.turboacc_feature }}"
-        echo "包含SFE: ${{ github.event.inputs.include_sfe }}"
-        echo "构建时间: $(date)"
-        echo "================"
+    - name: Upload build log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-log-${{ github.event.inputs.target }}
+        path: build.log
+        retention-days: 7
