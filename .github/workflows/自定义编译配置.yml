@@ -84,6 +84,30 @@ jobs:
           rsync \
           libelf-dev
 
+    - name: 检查系统信息
+      run: |
+        echo "=== GitHub Actions 运行器系统信息 ==="
+        echo "操作系统: $(lsb_release -d | cut -f2)"
+        echo "内核版本: $(uname -r)"
+        echo "系统架构: $(uname -m)"
+        echo ""
+        echo "=== CPU 信息 ==="
+        echo "CPU 型号: $(grep 'model name' /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)"
+        echo "CPU 核心数: $(nproc)"
+        echo "CPU 线程数: $(grep -c '^processor' /proc/cpuinfo)"
+        echo "CPU 频率: $(grep 'cpu MHz' /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs) MHz"
+        echo ""
+        echo "=== 内存信息 ==="
+        free -h
+        echo ""
+        echo "=== 磁盘信息 ==="
+        df -h
+        echo ""
+        echo "=== 环境信息 ==="
+        echo "运行器: ${{ runner.os }}"
+        echo "工作目录: ${{ github.workspace }}"
+        echo ""
+
     - name: 安装Python依赖
       run: |
         python3 -m pip install --upgrade pip
