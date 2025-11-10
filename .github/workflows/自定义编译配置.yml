@@ -168,6 +168,10 @@ jobs:
           cp configs/nanopi-r6s.config .config
           echo "选择NanoPi R6S配置"
         fi
+        # 禁用有问题的包
+        echo "CONFIG_PACKAGE_rtpengine=n" >> .config
+        echo "CONFIG_PACKAGE_rtpengine-full=n" >> .config
+        echo "CONFIG_PACKAGE_rtpengine-no-transcode=n" >> .config
         
         # 内核模块配置
         echo "CONFIG_ALL_KMODS=y" >> .config
