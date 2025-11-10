@@ -154,6 +154,16 @@ jobs:
         else
             echo "⚠️ shortcut-fe 不存在"
         fi
+        
+        # 检查 iStore 相关包
+        echo "检查 iStore 包状态:"
+        for pkg in luci-app-istorex luci-app-quickstart luci-app-store luci-lib-taskd quickstart luci-lib-xterm taskd; do
+            if [ -d "package/$pkg" ]; then
+                echo "✅ $pkg 存在"
+            else
+                echo "❌ $pkg 不存在"
+            fi
+        done
 
     - name: 更新软件源
       run: |
@@ -177,8 +187,15 @@ jobs:
         # 启用APK包管理
         echo "CONFIG_USE_APK=y" >> .config
         
-        # 修复 Python 依赖警告
+        # 修复 Python 依赖
+        echo "CONFIG_PACKAGE_python3=y" >> .config
+        echo "CONFIG_PACKAGE_python3-light=y" >> .config
         echo "CONFIG_PACKAGE_python3-distutils=m" >> .config
+        
+        # Lua 支持
+        echo "CONFIG_PACKAGE_lua=y" >> .config
+        echo "CONFIG_PACKAGE_liblucihttp=m" >> .config
+        echo "CONFIG_PACKAGE_liblucihttp-lua=m" >> .config
         
         # 基础系统 - 最小化内置
         echo "CONFIG_PACKAGE_luci=m" >> .config
@@ -187,7 +204,20 @@ jobs:
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=m" >> .config
         echo "CONFIG_LUCI_LANG_zh-cn=m" >> .config
         
-        # 基础网络工具 - 模块化
+        # iStore 相关包 - 模块化
+        echo "CONFIG_PACKAGE_luci-app-istorex=m" >> .config
+        echo "CONFIG_PACKAGE_luci-app-quickstart=m" >> .config
+        echo "CONFIG_PACKAGE_luci-app-store=m" >> .config
+        echo "CONFIG_PACKAGE_luci-lib-taskd=m" >> .config
+        echo "CONFIG_PACKAGE_quickstart=m" >> .config
+        echo "CONFIG_PACKAGE_luci-lib-xterm=m" >> .config
+        echo "CONFIG_PACKAGE_taskd=m" >> .config
+        
+        # Argon 主题（可选）
+        echo "CONFIG_PACKAGE_luci-theme-argon=m" >> .config
+        echo "CONFIG_PACKAGE_luci-app-argon-config=m" >> .config
+        
+        # 基础网络工具
         echo "CONFIG_PACKAGE_iptables=m" >> .config
         echo "CONFIG_PACKAGE_iptables-mod-conntrack-extra=m" >> .config
         echo "CONFIG_PACKAGE_iptables-mod-ipopt=m" >> .config
@@ -197,11 +227,11 @@ jobs:
         echo "CONFIG_PACKAGE_ip6tables=m" >> .config
         echo "CONFIG_PACKAGE_ip6tables-mod-nat=m" >> .config
         
-        # 防火墙 - 模块化
+        # 防火墙
         echo "CONFIG_PACKAGE_firewall=m" >> .config
         echo "CONFIG_PACKAGE_firewall4=m" >> .config
         
-        # TurboACC核心功能 - 模块化
+        # TurboACC核心功能
         echo "CONFIG_PACKAGE_luci-app-turboacc=m" >> .config
         echo "CONFIG_PACKAGE_nft-fullcone=m" >> .config
         
@@ -213,19 +243,23 @@ jobs:
           echo "CONFIG_PACKAGE_kmod-fast-classifier=m" >> .config
         fi
         
-        # 系统工具 - 模块化
+        # 系统工具
         echo "CONFIG_PACKAGE_curl=m" >> .config
         echo "CONFIG_PACKAGE_bash=m" >> .config
         echo "CONFIG_PACKAGE_htop=m" >> .config
         echo "CONFIG_PACKAGE_nano=m" >> .config
         echo "CONFIG_PACKAGE_vim=m" >> .config
+        echo "CONFIG_PACKAGE_tar=m" >> .config
         echo "CONFIG_PACKAGE_git=m" >> .config
         echo "CONFIG_PACKAGE_git-http=m" >> .config
+        echo "CONFIG_PACKAGE_parted=m" >> .config
+        echo "CONFIG_PACKAGE_smartmontools=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils=m" >> .config
+        echo "CONFIG_PACKAGE_coreutils-stty=m" >> .config
         
-        # 网络诊断工具 - 模块化
+        # 网络诊断工具
         echo "CONFIG_PACKAGE_iperf3=m" >> .config
         echo "CONFIG_PACKAGE_tcpdump=m" >> .config
-        echo "CONFIG_PACKAGE_curl=m" >> .config
         echo "CONFIG_PACKAGE_wget=m" >> .config
         echo "CONFIG_PACKAGE_iputils-ping=m" >> .config
         echo "CONFIG_PACKAGE_iputils-traceroute=m" >> .config
@@ -273,6 +307,11 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-usb2=m" >> .config
         echo "CONFIG_PACKAGE_kmod-usb3=m" >> .config
         
+        # 禁用有问题的包
+        echo "CONFIG_PACKAGE_rtpengine=n" >> .config
+        echo "CONFIG_PACKAGE_rtpengine-full=n" >> .config
+        echo "CONFIG_PACKAGE_rtpengine-no-transcode=n" >> .config
+        
         # 仅内置最基础的系统组件
         echo "CONFIG_PACKAGE_base-files=y" >> .config
         echo "CONFIG_PACKAGE_busybox=y" >> .config
@@ -296,7 +335,7 @@ jobs:
         echo "TurboACC功能: ${{ github.event.inputs.turboacc_feature }}" >> version-info.txt
         echo "包含SFE: ${{ github.event.inputs.include_sfe }}" >> version-info.txt
         echo "Git提交: $(git log -1 --format=%h)" >> version-info.txt
-        echo "自定义功能: Fullcone NAT + TurboACC" >> version-info.txt
+        echo "自定义功能: Fullcone NAT + TurboACC + iStore" >> version-info.txt
         echo "编译策略: 全kmods + 模块化插件" >> version-info.txt
         cat version-info.txt
 
