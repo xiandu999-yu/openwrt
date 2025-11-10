@@ -2,30 +2,29 @@
 
 set -e
 
-echo "Applying custom patches and features..."
+echo "=== 应用自定义修改 ==="
 
 # 修改默认IP地址
 sed -i 's/192.168.1.1/192.168.20.1/g' package/base-files/files/bin/config_generate
 
-# 检查并安装Python依赖
-echo "检查Python依赖..."
-python3 -c "import elftools" 2>/dev/null || {
-    echo "安装Python elftools..."
-    pip3 install pyelftools
-}
+# 安装Python依赖
+python3 -c "import elftools" 2>/dev/null || pip3 install pyelftools
 
-# 集成TurboACC和Fullcone NAT
-echo "集成TurboACC和Fullcone NAT..."
+# 集成TurboACC
 if [ -f "scripts/integrate-features.sh" ]; then
     chmod +x scripts/integrate-features.sh
-    # 根据参数决定是否包含SFE
-    if [ "$1" = "--with-sfe" ]; then
+    if [ "$1" = "--with-sfe" ] || [ "$2" = "--with-sfe" ]; then
+        echo "集成TurboACC (含SFE)..."
         ./scripts/integrate-features.sh --with-sfe
     else
+        echo "集成TurboACC (仅Fullcone)..."
         ./scripts/integrate-features.sh
     fi
-else
-    echo "⚠️ integrate-features.sh 不存在，跳过TurboACC集成"
 fi
 
-echo "Custom patches applied successfully"
+# 添加软件包
+if [ -f "scripts/add-packages.sh" ]; then
+    ./scripts/add-packages.sh
+fi
+
+echo "✅ 自定义修改应用完成"
