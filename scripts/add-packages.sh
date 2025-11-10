@@ -16,10 +16,11 @@ if [ -d "small/luci-app-istorex" ]; then
     
     # 修复luci-app-istorex的依赖
     if [ -f "luci-app-istorex/Makefile" ]; then
-        sed -i 's/luci-lua-runtime//g' luci-app-istorex/Makefile
-        sed -i 's/luci-base\/host//g' luci-app-istorex/Makefile
-        sed -i 's/csstidy\/host//g' luci-app-istorex/Makefile
-        sed -i 's/luasrcdiet\/host//g' luci-app-istorex/Makefile
+        # 备份原文件
+        cp luci-app-istorex/Makefile luci-app-istorex/Makefile.bak
+        # 使用更安全的sed命令
+        sed -i 's/DEPENDS:=.*/DEPENDS:=+lua +libc +LUCI_LANG_zh-cn/g' luci-app-istorex/Makefile
+        echo "✅ luci-app-istorex 依赖修复完成"
     fi
 fi
 
@@ -29,10 +30,9 @@ if [ -d "small/luci-app-quickstart" ]; then
     
     # 修复luci-app-quickstart的依赖
     if [ -f "luci-app-quickstart/Makefile" ]; then
-        sed -i 's/luci-lua-runtime//g' luci-app-quickstart/Makefile
-        sed -i 's/luci-base\/host//g' luci-app-quickstart/Makefile
-        sed -i 's/csstidy\/host//g' luci-app-quickstart/Makefile
-        sed -i 's/luasrcdiet\/host//g' luci-app-quickstart/Makefile
+        cp luci-app-quickstart/Makefile luci-app-quickstart/Makefile.bak
+        sed -i 's/DEPENDS:=.*/DEPENDS:=+lua +libc +LUCI_LANG_zh-cn/g' luci-app-quickstart/Makefile
+        echo "✅ luci-app-quickstart 依赖修复完成"
     fi
 fi
 
@@ -42,12 +42,12 @@ if [ -d "small/luci-app-store" ]; then
     
     # 修复luci-app-store的依赖
     if [ -f "luci-app-store/Makefile" ]; then
+        cp luci-app-store/Makefile luci-app-store/Makefile.bak
+        # 修复依赖，确保格式正确
+        sed -i 's/DEPENDS:=.*/DEPENDS:=+curl +tar +luci-base/g' luci-app-store/Makefile
+        # 修复其他依赖问题
         sed -i 's/luci-lua-runtime//g' luci-app-store/Makefile
-        sed -i 's/luci-base\/host//g' luci-app-store/Makefile
-        sed -i 's/csstidy\/host//g' luci-app-store/Makefile
-        sed -i 's/luasrcdiet\/host//g' luci-app-store/Makefile
-        # 添加缺失的依赖
-        sed -i 's/DEPENDS:=/DEPENDS:=+curl +tar +luci-base/g' luci-app-store/Makefile
+        echo "✅ luci-app-store 依赖修复完成"
     fi
 fi
 
@@ -58,10 +58,9 @@ if [ -d "small/luci-lib-taskd" ]; then
     
     # 修复依赖
     if [ -f "luci-lib-taskd/Makefile" ]; then
-        sed -i 's/luci-lua-runtime//g' luci-lib-taskd/Makefile
-        sed -i 's/luci-base\/host//g' luci-lib-taskd/Makefile
-        sed -i 's/csstidy\/host//g' luci-lib-taskd/Makefile
-        sed -i 's/luasrcdiet\/host//g' luci-lib-taskd/Makefile
+        cp luci-lib-taskd/Makefile luci-lib-taskd/Makefile.bak
+        sed -i 's/DEPENDS:=.*/DEPENDS:=+lua +libc/g' luci-lib-taskd/Makefile
+        echo "✅ luci-lib-taskd 依赖修复完成"
     fi
 fi
 
@@ -69,16 +68,12 @@ if [ -d "small/quickstart" ]; then
     echo "Adding quickstart..."
     cp -r small/quickstart .
     
-    # 修复quickstart的依赖
+    # 修复quickstart的依赖 - 使用更安全的方法
     if [ -f "quickstart/Makefile" ]; then
-        sed -i 's/shadow-utils//g' quickstart/Makefile
-        sed -i 's/shadow-useradd//g' quickstart/Makefile
-        sed -i 's/parted//g' quickstart/Makefile
-        sed -i 's/smartmontools//g' quickstart/Makefile
-        sed -i 's/smartd//g' quickstart/Makefile
-        sed -i 's/bash//g' quickstart/Makefile
-        # 添加基础依赖
-        sed -i 's/DEPENDS:=/DEPENDS:=+coreutils +parted +smartmontools +bash/g' quickstart/Makefile
+        cp quickstart/Makefile quickstart/Makefile.bak
+        # 完全重写DEPENDS行
+        sed -i '/^DEPENDS:=/c\DEPENDS:=+coreutils +parted +smartmontools +bash' quickstart/Makefile
+        echo "✅ quickstart 依赖修复完成"
     fi
 fi
 
@@ -88,10 +83,9 @@ if [ -d "small/luci-lib-xterm" ]; then
     
     # 修复依赖
     if [ -f "luci-lib-xterm/Makefile" ]; then
-        sed -i 's/luci-lua-runtime//g' luci-lib-xterm/Makefile
-        sed -i 's/luci-base\/host//g' luci-lib-xterm/Makefile
-        sed -i 's/csstidy\/host//g' luci-lib-xterm/Makefile
-        sed -i 's/luasrcdiet\/host//g' luci-lib-xterm/Makefile
+        cp luci-lib-xterm/Makefile luci-lib-xterm/Makefile.bak
+        sed -i 's/DEPENDS:=.*/DEPENDS:=+lua +libc/g' luci-lib-xterm/Makefile
+        echo "✅ luci-lib-xterm 依赖修复完成"
     fi
 fi
 
@@ -101,10 +95,10 @@ if [ -d "small/taskd" ]; then
     
     # 修复taskd的依赖
     if [ -f "taskd/Makefile" ]; then
-        sed -i 's/coreutils//g' taskd/Makefile
-        sed -i 's/coreutils-stty//g' taskd/Makefile
-        # 添加基础依赖
-        sed -i 's/DEPENDS:=/DEPENDS:=+coreutils +coreutils-stty/g' taskd/Makefile
+        cp taskd/Makefile taskd/Makefile.bak
+        # 完全重写DEPENDS行
+        sed -i '/^DEPENDS:=/c\DEPENDS:=+coreutils +coreutils-stty +procd' taskd/Makefile
+        echo "✅ taskd 依赖修复完成"
     fi
 fi
 
