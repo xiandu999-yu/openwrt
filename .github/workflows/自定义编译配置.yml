@@ -52,6 +52,7 @@ jobs:
           build_dir
           staging_dir
           tmp
+          .config
         key: ${{ runner.os }}-openwrt-${{ hashFiles('configs/*.config', 'feeds.conf', '.config') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-
@@ -168,6 +169,7 @@ jobs:
           cp configs/nanopi-r6s.config .config
           echo "选择NanoPi R6S配置"
         fi
+        
         # 禁用有问题的包
         echo "CONFIG_PACKAGE_rtpengine=n" >> .config
         echo "CONFIG_PACKAGE_rtpengine-full=n" >> .config
@@ -229,6 +231,9 @@ jobs:
         echo "=== 高性能编译配置 ==="
         echo "硬件: 4核心 AMD EPYC + 15GB 内存"
         
+        # 创建构建日志目录
+        mkdir -p logs
+        
         # 分阶段优化配置
         {
             echo "阶段1: 下载软件包 (4线程)"
@@ -246,7 +251,7 @@ jobs:
             
             echo "阶段5: 生成固件镜像 (2线程)"
             make -j2 V=s
-        } | tee build-optimized.log
+        } 2>&1 | tee logs/build-optimized.log
         
         echo "✅ 编译完成！资源利用率最大化"
 
@@ -255,29 +260,50 @@ jobs:
         echo "生成APK软件包索引..."
         make package/index
 
+    - name: 准备上传文件
+      run: |
+        # 创建上传目录
+        mkdir -p upload/firmware
+        mkdir -p upload/packages
+        mkdir -p upload/logs
+        
+        # 复制固件文件
+        if [ -d "bin/targets" ]; then
+          cp -r bin/targets/* upload/firmware/ || echo "固件目录复制失败"
+        fi
+        
+        # 复制软件包
+        if [ -d "bin/packages" ]; then
+          cp -r bin/packages/* upload/packages/ || echo "软件包目录复制失败"
+        fi
+        
+        # 复制日志和配置文件
+        cp version-info.txt upload/
+        cp .config upload/ 2>/dev/null || echo ".config 不存在"
+        cp logs/build-optimized.log upload/logs/ 2>/dev/null || echo "构建日志不存在"
+        
+        # 检查文件是否存在
+        echo "=== 准备上传的文件 ==="
+        find upload/ -type f | head -20
+
     - name: 上传固件镜像
       uses: actions/upload-artifact@v4
       with:
         name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}
-        path: |
-          bin/targets/
-          version-info.txt
+        path: upload/firmware/
         retention-days: 30
 
     - name: 上传软件包
       uses: actions/upload-artifact@v4
       with:
         name: packages-${{ github.event.inputs.target_device }}
-        path: |
-          bin/packages/
+        path: upload/packages/
         retention-days: 30
 
-    - name: 上传构建日志
+    - name: 上传构建日志和配置
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-log-${{ github.event.inputs.target_device }}
-        path: |
-          build.log
-          .config
+        name: build-info-${{ github.event.inputs.target_device }}
+        path: upload/
         retention-days: 7
