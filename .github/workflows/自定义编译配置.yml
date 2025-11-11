@@ -137,6 +137,11 @@ jobs:
         echo "添加软件包..."
         ./scripts/add-packages.sh
 
+    - name: 修复 Shortcut FE 内核兼容性
+      run: |
+        chmod +x scripts/fix-sfe-kernel-6.12.sh
+        ./scripts/fix-sfe-kernel-6.12.sh
+
     - name: 专门检查 Shortcut FE
       run: |
         chmod +x scripts/check-shortcut-fe.sh
