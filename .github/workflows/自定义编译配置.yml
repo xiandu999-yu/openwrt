@@ -28,6 +28,14 @@ on:
         options:
           - fullcone-only
           - with-sfe
+      compile_threads:  # 编译线程数
+        description: '选择编译线程数 (单线程更稳定，多线程更快)'
+        required: false
+        default: 'single'
+        type: choice
+        options:
+          - single
+          - multi
 
 env:
   TIMEOUT: 360m
@@ -108,6 +116,7 @@ jobs:
         echo "=== 环境信息 ==="
         echo "运行器: ${{ runner.os }}"
         echo "工作目录: ${{ github.workspace }}"
+        echo "编译线程模式: ${{ github.event.inputs.compile_threads }}"
         echo ""
 
     - name: 安装Python依赖
@@ -338,6 +347,7 @@ jobs:
         echo "目标设备: ${{ github.event.inputs.target_device }}" >> version-info.txt
         echo "TurboACC功能: ${{ github.event.inputs.turboacc_feature }}" >> version-info.txt
         echo "包含SFE: ${{ github.event.inputs.include_sfe }}" >> version-info.txt
+        echo "编译线程: ${{ github.event.inputs.compile_threads }}" >> version-info.txt
         echo "Git提交: $(git log -1 --format=%h)" >> version-info.txt
         echo "自定义功能: Fullcone NAT + TurboACC + iStore" >> version-info.txt
         echo "编译策略: 全kmods + 模块化插件" >> version-info.txt
@@ -357,24 +367,74 @@ jobs:
         chmod +x scripts/check-shortcut-fe.sh
         ./scripts/check-shortcut-fe.sh
         
-    - name: 构建固件（最大化利用资源）
+    - name: 修复已知编译错误
+      run: |
+        echo "修复已知的编译问题..."
+    
+        # 修复 gnutls 编译问题
+        echo "修复 gnutls 编译问题..."
+        if [ -d "feeds/packages/libs/gnutls" ]; then
+          echo "应用 gnutls 补丁..."
+          # 清理可能损坏的构建状态
+          rm -rf build_dir/target-*/gnutls-*
+          rm -rf staging_dir/target-*/gnutls
+          rm -rf tmp/build/gnutls
+      
+          # 应用补丁文件（如果存在）
+          if [ -f "scripts/patches/gnutls-fix.patch" ]; then
+            cd feeds/packages/libs/gnutls
+            patch -p1 < ../../../../scripts/patches/gnutls-fix.patch
+            cd ../../../../
+          fi
+        fi
+    
+        # 修复其他已知问题
+        echo "清理有问题的包..."
+        rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
+    
+        # 修复 Shortcut FE
+        if [ -d "package/qca/shortcut-fe" ]; then
+          chmod +x scripts/fix-sfe-kernel-6.12.sh
+          ./scripts/fix-sfe-kernel-6.12.sh
+        fi
+
+    - name: 构建固件（智能线程选择）
       run: |
         echo "=== 开始编译固件 ==="
-        echo "使用最大化资源编译，超时设置为6小时"
+        echo "编译线程模式: ${{ github.event.inputs.compile_threads }}"
         
         # 创建构建日志目录
         mkdir -p logs
         
-        # 使用所有可用CPU核心
-        CPU_CORES=$(nproc)
-        echo "使用所有 $CPU_CORES 个CPU核心进行编译"
+        # 根据选择设置线程数
+        if [ "${{ github.event.inputs.compile_threads }}" = "multi" ]; then
+          # 多线程模式 - 使用所有可用CPU核心
+          CPU_CORES=$(nproc)
+          echo "使用多线程模式: $CPU_CORES 个CPU核心"
+          THREADS=$CPU_CORES
+          MODE="多线程(快速)"
+        else
+          # 单线程模式 - 默认更稳定
+          CPU_CORES=$(nproc)
+          THREADS=1
+          MODE="单线程(稳定)"
+          echo "使用单线程模式: 1 个CPU核心 (系统有 $CPU_CORES 个核心)"
+        fi
+        
+        echo "编译模式: $MODE"
+        echo "使用线程数: $THREADS"
         
         # 设置编译环境变量优化
         export FORCE_UNSAFE_CONFIGURE=1
         
-        # 使用多线程编译，充分利用6小时时间
-        echo "开始全量编译..."
-        make -j$CPU_CORES V=s 2>&1 | tee logs/build-full.log
+        # 根据线程数选择编译策略
+        if [ "$THREADS" -eq 1 ]; then
+          echo "开始单线程编译..."
+          make -j1 V=s 2>&1 | tee logs/build-single-thread.log
+        else
+          echo "开始多线程编译..."
+          make -j$THREADS V=s 2>&1 | tee logs/build-multi-thread.log
+        fi
         
         echo "✅ 编译完成！"
 
@@ -440,7 +500,7 @@ jobs:
     - name: 上传固件镜像
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}
+        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}-${{ github.event.inputs.compile_threads }}
         path: upload/firmware/
         retention-days: 30
         if-no-files-found: warn
@@ -448,7 +508,7 @@ jobs:
     - name: 上传软件包
       uses: actions/upload-artifact@v4
       with:
-        name: packages-${{ github.event.inputs.target_device }}
+        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}
         path: upload/packages/
         retention-days: 30
         if-no-files-found: warn
@@ -457,7 +517,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-info-${{ github.event.inputs.target_device }}
+        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}
         path: upload/
         retention-days: 7
         if-no-files-found: warn
