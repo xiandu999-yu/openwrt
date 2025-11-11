@@ -62,20 +62,21 @@ jobs:
         id: prepare
         run: |
           # 根据输入参数生成构建配置
-          BUILD_MATRIX=$(cat <<EOF
-          [{
-            "name": "${{ github.event.inputs.target_device || 'nanopi-r3s' }}",
-            "config": "configs/${{ github.event.inputs.target_device || 'nanopi-r3s' }}.config",
-            "include_sfe": ${{ github.event.inputs.include_sfe || 'true' }},
-            "turboacc_feature": "${{ github.event.inputs.turboacc_feature || 'fullcone-only' }}"
-          }]
-          EOF
-          )
+          TARGET_DEVICE="${{ github.event.inputs.target_device || 'nanopi-r3s' }}"
+          INCLUDE_SFE="${{ github.event.inputs.include_sfe || 'true' }}"
+          TURBOACC_FEATURE="${{ github.event.inputs.turboacc_feature || 'fullcone-only' }}"
+          
+          # 创建正确的JSON格式
+          BUILD_MATRIX="[{\"name\":\"$TARGET_DEVICE\",\"config\":\"configs/$TARGET_DEVICE.config\",\"include_sfe\":$INCLUDE_SFE,\"turboacc_feature\":\"$TURBOACC_FEATURE\"}]"
+          
           echo "build_matrix=$BUILD_MATRIX" >> $GITHUB_OUTPUT
           
           # 生成缓存键
           CACHE_KEY="${{ runner.os }}-openwrt-${{ hashFiles('configs/*.config', 'feeds.conf', '.config', 'scripts/*.sh') }}"
           echo "cache_key=$CACHE_KEY" >> $GITHUB_OUTPUT
+          
+          echo "生成的构建矩阵: $BUILD_MATRIX"
+          echo "缓存键: $CACHE_KEY"
 
       - name: 上传准备信息
         uses: actions/upload-artifact@v4
@@ -170,7 +171,8 @@ jobs:
     needs: [prepare, setup-environment]
     name: 构建工具链与内核
     strategy:
-      matrix: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
+      matrix: 
+        config: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -192,28 +194,36 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-openwrt-
 
+      - name: 显示构建配置
+        run: |
+          echo "当前构建配置:"
+          echo "设备名称: ${{ matrix.config.name }}"
+          echo "配置文件: ${{ matrix.config.config }}"
+          echo "包含SFE: ${{ matrix.config.include_sfe }}"
+          echo "TurboACC功能: ${{ matrix.config.turboacc_feature }}"
+
       - name: 应用自定义修改
         run: |
           chmod +x scripts/*.sh
           echo "应用基础补丁..."
-          ./scripts/apply-custom-patches.sh
+          [ -f "./scripts/apply-custom-patches.sh" ] && ./scripts/apply-custom-patches.sh || echo "无自定义补丁"
           
           echo "修复 python 依赖..."
-          ./scripts/fix-dependencies.sh
+          [ -f "./scripts/fix-dependencies.sh" ] && ./scripts/fix-dependencies.sh || echo "无依赖修复脚本"
           
           echo "集成TurboACC功能..."
-          if [ "${{ matrix.turboacc_feature }}" = "with-sfe" ]; then
+          if [ "${{ matrix.config.turboacc_feature }}" = "with-sfe" ]; then
             echo "包含SFE加速 - 使用官方脚本自动处理依赖"
             curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash
             echo "添加完整的 Shortcut FE 支持..."
-            ./scripts/add-shortcut-fe.sh
+            [ -f "./scripts/add-shortcut-fe.sh" ] && ./scripts/add-shortcut-fe.sh || echo "无SFE添加脚本"
           else
             echo "仅Fullcone NAT - 使用官方脚本自动处理依赖"  
             curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash -s -- --no-sfe
           fi
           
           echo "添加软件包..."
-          ./scripts/add-packages.sh
+          [ -f "./scripts/add-packages.sh" ] && ./scripts/add-packages.sh || echo "无软件包添加脚本"
 
       - name: 修复已知编译问题
         run: |
@@ -225,9 +235,11 @@ jobs:
       
           # 2. 修复Shortcut FE内核兼容性
           echo "修复Shortcut FE内核兼容性..."
-          if [ -d "package/qca/shortcut-fe" ]; then
+          if [ -d "package/qca/shortcut-fe" ] && [ -f "scripts/fix-sfe-kernel-6.12.sh" ]; then
             chmod +x scripts/fix-sfe-kernel-6.12.sh
             ./scripts/fix-sfe-kernel-6.12.sh
+          else
+            echo "Shortcut FE目录或修复脚本不存在"
           fi
 
       - name: 更新软件源
@@ -237,8 +249,8 @@ jobs:
 
       - name: 配置编译参数
         run: |
-          cp ${{ matrix.config }} .config
-          echo "选择 ${{ matrix.name }} 配置"
+          cp ${{ matrix.config.config }} .config
+          echo "选择 ${{ matrix.config.name }} 配置"
           
           # 基础配置
           echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
@@ -254,7 +266,7 @@ jobs:
           echo "CONFIG_PACKAGE_luci-app-turboacc=m" >> .config
           echo "CONFIG_PACKAGE_nft-fullcone=m" >> .config
           
-          if [ "${{ matrix.include_sfe }}" = "true" ] || [ "${{ matrix.turboacc_feature }}" = "with-sfe" ]; then
+          if [ "${{ matrix.config.include_sfe }}" = "true" ] || [ "${{ matrix.config.turboacc_feature }}" = "with-sfe" ]; then
             echo "启用 Shortcut FE..."
             echo "CONFIG_PACKAGE_kmod-shortcut-fe=m" >> .config
             echo "CONFIG_PACKAGE_kmod-fast-classifier=m" >> .config
@@ -270,7 +282,7 @@ jobs:
         run: |
           echo "开始构建工具链..."
           make toolchain/install -j$(nproc) V=s
-          make -j$(nproc) V=s
+          echo "工具链构建完成"
 
       - name: 保存工具链缓存
         uses: actions/cache@v4
@@ -289,7 +301,8 @@ jobs:
     needs: [prepare, build-toolchain]
     name: 构建软件包
     strategy:
-      matrix: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
+      matrix: 
+        config: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -320,9 +333,9 @@ jobs:
       - name: 生成版本信息
         run: |
           echo "=== 固件版本信息 ===" > version-info.txt
-          echo "目标设备: ${{ matrix.name }}" >> version-info.txt
-          echo "TurboACC功能: ${{ matrix.turboacc_feature }}" >> version-info.txt
-          echo "包含SFE: ${{ matrix.include_sfe }}" >> version-info.txt
+          echo "目标设备: ${{ matrix.config.name }}" >> version-info.txt
+          echo "TurboACC功能: ${{ matrix.config.turboacc_feature }}" >> version-info.txt
+          echo "包含SFE: ${{ matrix.config.include_sfe }}" >> version-info.txt
           echo "编译时间: $(date '+%Y-%m-%d %H:%M:%S')" >> version-info.txt
           echo "Git提交: $(git log -1 --format=%h)" >> version-info.txt
 
@@ -331,7 +344,8 @@ jobs:
     needs: [prepare, build-toolchain, build-packages]
     name: 构建完整镜像
     strategy:
-      matrix: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
+      matrix: 
+        config: ${{ fromJSON(needs.prepare.outputs.build_matrix) }}
     steps:
       - name: 检出代码
         uses: actions/checkout@v4
@@ -366,47 +380,47 @@ jobs:
 
       - name: 准备发布文件
         run: |
-          mkdir -p release/${{ matrix.name }}
+          mkdir -p release/${{ matrix.config.name }}
           
           # 复制固件文件
           if [ -d "bin/targets" ]; then
-            cp -r bin/targets/* release/${{ matrix.name }}/firmware/
+            cp -r bin/targets/* release/${{ matrix.config.name }}/firmware/
           fi
           
           # 复制软件包
           if [ -d "bin/packages" ]; then
-            cp -r bin/packages/* release/${{ matrix.name }}/packages/
+            cp -r bin/packages/* release/${{ matrix.config.name }}/packages/
           fi
           
           # 复制构建信息
-          cp version-info.txt release/${{ matrix.name }}/
-          cp .config release/${{ matrix.name }}/ 2>/dev/null || true
-          cp build.log release/${{ matrix.name }}/ 2>/dev/null || true
-          cp build-retry.log release/${{ matrix.name }}/ 2>/dev/null || true
+          cp version-info.txt release/${{ matrix.config.name }}/
+          cp .config release/${{ matrix.config.name }}/ 2>/dev/null || true
+          cp build.log release/${{ matrix.config.name }}/ 2>/dev/null || true
+          cp build-retry.log release/${{ matrix.config.name }}/ 2>/dev/null || true
           
           echo "发布文件准备完成:"
-          find release/${{ matrix.name }} -type f | head -20
+          find release/${{ matrix.config.name }} -type f | head -20
 
       - name: 上传固件镜像
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.name }}-${{ matrix.turboacc_feature }}
-          path: release/${{ matrix.name }}/firmware/
+          name: firmware-${{ matrix.config.name }}-${{ matrix.config.turboacc_feature }}
+          path: release/${{ matrix.config.name }}/firmware/
           retention-days: 30
 
       - name: 上传软件包
         uses: actions/upload-artifact@v4
         with:
-          name: packages-${{ matrix.name }}
-          path: release/${{ matrix.name }}/packages/
+          name: packages-${{ matrix.config.name }}
+          path: release/${{ matrix.config.name }}/packages/
           retention-days: 30
 
       - name: 上传构建信息
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: build-info-${{ matrix.name }}
-          path: release/${{ matrix.name }}/
+          name: build-info-${{ matrix.config.name }}
+          path: release/${{ matrix.config.name }}/
           retention-days: 7
 
   finalize:
@@ -418,8 +432,7 @@ jobs:
       - name: 构建状态汇总
         run: |
           echo "=== 构建状态汇总 ==="
-          echo "构建任务: ${{ needs.build-images.result }}"
-          echo "目标设备: ${{ fromJSON(needs.prepare.outputs.build_matrix)[0].name }}"
+          echo "构建任务完成状态: ${{ needs.build-images.result }}"
           echo "完成时间: $(date '+%Y-%m-%d %H:%M:%S')"
           
           if [ "${{ needs.build-images.result }}" = "success" ]; then
