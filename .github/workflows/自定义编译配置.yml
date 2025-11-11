@@ -36,6 +36,19 @@ on:
         options:
           - single
           - multi
+      build_mode:  # 编译模式
+        description: '选择编译模式 (firmware=全kmods+固件, full=全kmods+固件+全插件)'
+        required: false
+        default: 'firmware'
+        type: choice
+        options:
+          - firmware
+          - full
+      include_istore:  # 包含iStore
+        description: '是否包含iStore相关功能'
+        type: boolean
+        required: false
+        default: true
 
 env:
   TIMEOUT: 360m
@@ -117,6 +130,8 @@ jobs:
         echo "运行器: ${{ runner.os }}"
         echo "工作目录: ${{ github.workspace }}"
         echo "编译线程模式: ${{ github.event.inputs.compile_threads }}"
+        echo "编译模式: ${{ github.event.inputs.build_mode }}"
+        echo "包含iStore: ${{ github.event.inputs.include_istore }}"
         echo ""
 
     - name: 安装Python依赖
@@ -235,8 +250,13 @@ jobs:
           curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash -s -- --no-sfe
         fi
         
-        echo "添加软件包..."
-        ./scripts/add-packages.sh
+        # 根据iStore开关决定是否添加软件包
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "添加iStore相关软件包..."
+          ./scripts/add-packages.sh
+        else
+          echo "跳过iStore相关软件包..."
+        fi
 
     - name: 修复已知编译问题
       run: |
@@ -290,14 +310,18 @@ jobs:
         fi
         
         # 检查 iStore 相关包
-        echo "检查 iStore 包状态:"
-        for pkg in luci-app-istorex luci-app-quickstart luci-app-store luci-lib-taskd quickstart luci-lib-xterm taskd; do
-            if [ -d "package/$pkg" ]; then
-                echo "✅ $pkg 存在"
-            else
-                echo "❌ $pkg 不存在"
-            fi
-        done
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "检查 iStore 包状态:"
+          for pkg in luci-app-istorex luci-app-quickstart luci-app-store luci-lib-taskd quickstart luci-lib-xterm taskd; do
+              if [ -d "package/$pkg" ]; then
+                  echo "✅ $pkg 存在"
+              else
+                  echo "❌ $pkg 不存在"
+              fi
+          done
+        else
+          echo "跳过 iStore 包检查"
+        fi
 
     - name: 配置编译参数
       run: |
@@ -322,7 +346,7 @@ jobs:
         echo "# CONFIG_PACKAGE_mesa is not set" >> .config
         echo "# CONFIG_PACKAGE_xkeyboard-config is not set" >> .config
         
-        # 内核模块配置
+        # 内核模块配置 - 始终启用所有kmods
         echo "CONFIG_ALL_KMODS=y" >> .config
         echo "CONFIG_ALL_NONSHARED=n" >> .config
         
@@ -346,14 +370,26 @@ jobs:
         echo "CONFIG_PACKAGE_luci-theme-bootstrap=m" >> .config
         echo "CONFIG_LUCI_LANG_zh-cn=m" >> .config
         
-        # iStore 相关包 - 模块化
-        echo "CONFIG_PACKAGE_luci-app-istorex=m" >> .config
-        echo "CONFIG_PACKAGE_luci-app-quickstart=m" >> .config
-        echo "CONFIG_PACKAGE_luci-app-store=m" >> .config
-        echo "CONFIG_PACKAGE_luci-lib-taskd=m" >> .config
-        echo "CONFIG_PACKAGE_quickstart=m" >> .config
-        echo "CONFIG_PACKAGE_luci-lib-xterm=m" >> .config
-        echo "CONFIG_PACKAGE_taskd=m" >> .config
+        # iStore 相关包 - 根据开关配置
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "启用 iStore 相关包..."
+          echo "CONFIG_PACKAGE_luci-app-istorex=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-quickstart=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-store=m" >> .config
+          echo "CONFIG_PACKAGE_luci-lib-taskd=m" >> .config
+          echo "CONFIG_PACKAGE_quickstart=m" >> .config
+          echo "CONFIG_PACKAGE_luci-lib-xterm=m" >> .config
+          echo "CONFIG_PACKAGE_taskd=m" >> .config
+        else
+          echo "禁用 iStore 相关包..."
+          echo "# CONFIG_PACKAGE_luci-app-istorex is not set" >> .config
+          echo "# CONFIG_PACKAGE_luci-app-quickstart is not set" >> .config
+          echo "# CONFIG_PACKAGE_luci-app-store is not set" >> .config
+          echo "# CONFIG_PACKAGE_luci-lib-taskd is not set" >> .config
+          echo "# CONFIG_PACKAGE_quickstart is not set" >> .config
+          echo "# CONFIG_PACKAGE_luci-lib-xterm is not set" >> .config
+          echo "# CONFIG_PACKAGE_taskd is not set" >> .config
+        fi
         
         # Argon 主题（可选）
         echo "CONFIG_PACKAGE_luci-theme-argon=m" >> .config
@@ -405,24 +441,37 @@ jobs:
           echo "# CONFIG_PACKAGE_kmod-shortcut-fe-drv is not set" >> .config
         fi
         
-        # 系统工具
-        echo "CONFIG_PACKAGE_curl=m" >> .config
-        echo "CONFIG_PACKAGE_bash=m" >> .config
-        echo "CONFIG_PACKAGE_htop=m" >> .config
-        echo "CONFIG_PACKAGE_nano=m" >> .config
-        echo "CONFIG_PACKAGE_vim=m" >> .config
-        echo "CONFIG_PACKAGE_tar=m" >> .config
-        echo "CONFIG_PACKAGE_git=m" >> .config
-        echo "CONFIG_PACKAGE_git-http=m" >> .config
-        echo "CONFIG_PACKAGE_parted=m" >> .config
-        echo "CONFIG_PACKAGE_smartmontools=m" >> .config
+        # 根据编译模式决定是否包含完整工具集
+        if [ "${{ github.event.inputs.build_mode }}" = "full" ]; then
+          echo "编译模式: 全kmods+固件+全插件"
+          # 启用完整系统工具集
+          echo "CONFIG_PACKAGE_curl=m" >> .config
+          echo "CONFIG_PACKAGE_bash=m" >> .config
+          echo "CONFIG_PACKAGE_htop=m" >> .config
+          echo "CONFIG_PACKAGE_nano=m" >> .config
+          echo "CONFIG_PACKAGE_vim=m" >> .config
+          echo "CONFIG_PACKAGE_tar=m" >> .config
+          echo "CONFIG_PACKAGE_git=m" >> .config
+          echo "CONFIG_PACKAGE_git-http=m" >> .config
+          echo "CONFIG_PACKAGE_parted=m" >> .config
+          echo "CONFIG_PACKAGE_smartmontools=m" >> .config
         
-        # 网络诊断工具
-        echo "CONFIG_PACKAGE_iperf3=m" >> .config
-        echo "CONFIG_PACKAGE_tcpdump=m" >> .config
-        echo "CONFIG_PACKAGE_wget=m" >> .config
-        echo "CONFIG_PACKAGE_iputils-ping=m" >> .config
-        echo "CONFIG_PACKAGE_iputils-traceroute=m" >> .config
+          # 网络诊断工具
+          echo "CONFIG_PACKAGE_iperf3=m" >> .config
+          echo "CONFIG_PACKAGE_tcpdump=m" >> .config
+          echo "CONFIG_PACKAGE_wget=m" >> .config
+          echo "CONFIG_PACKAGE_iputils-ping=m" >> .config
+          echo "CONFIG_PACKAGE_iputils-traceroute=m" >> .config
+          
+          # 启用更多可选包
+          echo "CONFIG_PACKAGE_luci-app-upnp=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-ddns=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-wol=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-statistics=m" >> .config
+        else
+          echo "编译模式: 全kmods+固件"
+          # 精简模式，只保留基础工具
+        fi
         
         # 仅内置最基础的系统组件
         echo "CONFIG_PACKAGE_base-files=y" >> .config
@@ -447,9 +496,18 @@ jobs:
         echo "TurboACC功能: ${{ github.event.inputs.turboacc_feature }}" >> version-info.txt
         echo "包含SFE: ${{ github.event.inputs.include_sfe }}" >> version-info.txt
         echo "编译线程: ${{ github.event.inputs.compile_threads }}" >> version-info.txt
+        echo "编译模式: ${{ github.event.inputs.build_mode }}" >> version-info.txt
+        echo "包含iStore: ${{ github.event.inputs.include_istore }}" >> version-info.txt
         echo "Git提交: $(git log -1 --format=%h)" >> version-info.txt
-        echo "自定义功能: Fullcone NAT + TurboACC + iStore" >> version-info.txt
-        echo "编译策略: 全kmods + 模块化插件" >> version-info.txt
+        echo "核心功能: Fullcone NAT + TurboACC" >> version-info.txt
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "额外功能: iStore 应用商店" >> version-info.txt
+        fi
+        if [ "${{ github.event.inputs.build_mode }}" = "full" ]; then
+          echo "编译内容: 全kmods + 固件 + 全插件" >> version-info.txt
+        else
+          echo "编译内容: 全kmods + 固件" >> version-info.txt
+        fi
         cat version-info.txt
 
     - name: 清理有问题的包
@@ -501,6 +559,8 @@ jobs:
       run: |
         echo "=== 开始编译固件 ==="
         echo "编译线程模式: ${{ github.event.inputs.compile_threads }}"
+        echo "编译模式: ${{ github.event.inputs.build_mode }}"
+        echo "包含iStore: ${{ github.event.inputs.include_istore }}"
         
         # 创建构建日志目录
         mkdir -p logs
@@ -565,7 +625,7 @@ jobs:
         # 复制日志和配置文件
         cp version-info.txt upload/ 2>/dev/null || echo "版本信息文件不存在"
         cp .config upload/ 2>/dev/null || echo ".config 不存在"
-        cp logs/*.log upload/logs/ 2>/dev/null || echo "日志文件不存在"
+        cp logs/*.log upload/logs/ 2>&1 | head -10 || echo "日志文件不存在"
         
         # 检查文件是否存在
         echo "=== 准备上传的文件 ==="
@@ -589,7 +649,7 @@ jobs:
         fi
         
         # 检查软件包
-        PACKAGE_COUNT=$(find upload/packages/ -name "*.ipk" | wc -l)
+        PACKAGE_COUNT=$(find upload/packages/ -name "*.apk" | wc -l)
         if [ $PACKAGE_COUNT -gt 0 ]; then
           echo "✅ 找到 $PACKAGE_COUNT 个软件包"
         else
@@ -599,7 +659,7 @@ jobs:
     - name: 上传固件镜像
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}-${{ github.event.inputs.compile_threads }}
+        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}
         path: upload/firmware/
         retention-days: 30
         if-no-files-found: warn
@@ -607,7 +667,7 @@ jobs:
     - name: 上传软件包
       uses: actions/upload-artifact@v4
       with:
-        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}
+        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}
         path: upload/packages/
         retention-days: 30
         if-no-files-found: warn
@@ -616,7 +676,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}
+        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}
         path: upload/
         retention-days: 7
         if-no-files-found: warn
