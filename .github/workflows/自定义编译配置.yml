@@ -30,12 +30,12 @@ on:
           - with-sfe
 
 env:
-  TIMEOUT: 180m
+  TIMEOUT: 360m
 
 jobs:
   build:  # 编译
     runs-on: ubuntu-latest
-    timeout-minutes: 180  # 3小时超时
+    timeout-minutes: 360  # 6小时超时上限
     
     steps:
     - name: 检出代码
@@ -53,7 +53,8 @@ jobs:
           staging_dir
           tmp
           .config
-        key: ${{ runner.os }}-openwrt-${{ hashFiles('configs/*.config', 'feeds.conf', '.config') }}
+          feeds
+        key: ${{ runner.os }}-openwrt-${{ hashFiles('configs/*.config', 'feeds.conf', '.config', 'scripts/*.sh') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-
 
@@ -356,22 +357,24 @@ jobs:
         chmod +x scripts/check-shortcut-fe.sh
         ./scripts/check-shortcut-fe.sh
         
-    - name: 构建固件（单线程编译）
+    - name: 构建固件（最大化利用资源）
       run: |
         echo "=== 开始编译固件 ==="
-        echo "使用单线程编译以避免依赖问题"
+        echo "使用最大化资源编译，超时设置为6小时"
         
         # 创建构建日志目录
         mkdir -p logs
         
-        # 单线程编译，确保错误可见
-        make -j1 V=s 2>&1 | tee logs/build-detailed.log
+        # 使用所有可用CPU核心
+        CPU_CORES=$(nproc)
+        echo "使用所有 $CPU_CORES 个CPU核心进行编译"
         
-        # 如果第一次失败，尝试重新编译
-        if [ ${PIPESTATUS[0]} -ne 0 ]; then
-          echo "第一次编译失败，尝试重新编译..."
-          make -j1 V=s 2>&1 | tee logs/build-retry.log
-        fi
+        # 设置编译环境变量优化
+        export FORCE_UNSAFE_CONFIGURE=1
+        
+        # 使用多线程编译，充分利用6小时时间
+        echo "开始全量编译..."
+        make -j$CPU_CORES V=s 2>&1 | tee logs/build-full.log
         
         echo "✅ 编译完成！"
 
@@ -387,25 +390,52 @@ jobs:
         mkdir -p upload/packages
         mkdir -p upload/logs
         
-        # 复制固件文件
+        # 复制固件文件 - 全面查找
+        echo "查找固件文件..."
         if [ -d "bin/targets" ]; then
-          cp -r bin/targets/* upload/firmware/ || echo "固件目录复制失败"
+          echo "复制整个targets目录..."
+          find bin/targets/ -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.elf" -o -name "*.dtb" \) -exec cp --parents {} upload/firmware/ \; 2>/dev/null || echo "部分固件文件复制失败"
         fi
         
-        # 复制软件包
+        # 复制软件包目录结构
         if [ -d "bin/packages" ]; then
-          cp -r bin/packages/* upload/packages/ || echo "软件包目录复制失败"
+          echo "复制packages目录..."
+          cp -r bin/packages/* upload/packages/ 2>/dev/null || echo "部分软件包复制失败"
         fi
         
         # 复制日志和配置文件
-        cp version-info.txt upload/
+        cp version-info.txt upload/ 2>/dev/null || echo "版本信息文件不存在"
         cp .config upload/ 2>/dev/null || echo ".config 不存在"
-        cp logs/build-detailed.log upload/logs/ 2>/dev/null || echo "构建日志不存在"
-        cp logs/build-retry.log upload/logs/ 2>/dev/null || echo "重试日志不存在"
+        cp logs/*.log upload/logs/ 2>/dev/null || echo "日志文件不存在"
         
         # 检查文件是否存在
         echo "=== 准备上传的文件 ==="
-        find upload/ -type f | head -20
+        find upload/ -type f | head -30
+        echo "=== 目录大小 ==="
+        du -h -d 2 upload/
+
+    - name: 检查构建产物
+      run: |
+        echo "=== 构建产物检查 ==="
+        
+        # 检查固件文件
+        FIRMWARE_COUNT=$(find upload/firmware/ -type f | wc -l)
+        if [ $FIRMWARE_COUNT -gt 0 ]; then
+          echo "✅ 找到 $FIRMWARE_COUNT 个固件文件"
+          find upload/firmware/ -type f -name "*.bin" -o -name "*.img" | head -5
+        else
+          echo "❌ 未找到固件文件"
+          echo "检查原始构建目录..."
+          find bin/ -name "*.bin" -o -name "*.img" | head -10
+        fi
+        
+        # 检查软件包
+        PACKAGE_COUNT=$(find upload/packages/ -name "*.ipk" | wc -l)
+        if [ $PACKAGE_COUNT -gt 0 ]; then
+          echo "✅ 找到 $PACKAGE_COUNT 个软件包"
+        else
+          echo "⚠️ 未找到软件包文件"
+        fi
 
     - name: 上传固件镜像
       uses: actions/upload-artifact@v4
@@ -413,6 +443,7 @@ jobs:
         name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}
         path: upload/firmware/
         retention-days: 30
+        if-no-files-found: warn
 
     - name: 上传软件包
       uses: actions/upload-artifact@v4
@@ -420,6 +451,7 @@ jobs:
         name: packages-${{ github.event.inputs.target_device }}
         path: upload/packages/
         retention-days: 30
+        if-no-files-found: warn
 
     - name: 上传构建日志和配置
       if: always()
@@ -428,3 +460,4 @@ jobs:
         name: build-info-${{ github.event.inputs.target_device }}
         path: upload/
         retention-days: 7
+        if-no-files-found: warn
