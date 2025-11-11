@@ -288,10 +288,20 @@ jobs:
           sed -i 's/\/usr\/share\/X11\/xkb/\/usr\/share\/X11\/xkb-src/g' feeds/video/libs/xkeyboard-config/Makefile 2>/dev/null || echo "xkeyboard-config修复失败"
         fi
 
-    - name: 修复 Shortcut FE 内核兼容性
+    - name: 应用 Shortcut FE 内核补丁
       run: |
-        chmod +x scripts/fix-sfe-kernel-6.12.sh
-        ./scripts/fix-sfe-kernel-6.12.sh
+        chmod +x scripts/apply-sfe-kernel-patch.sh
+        ./scripts/apply-sfe-kernel-patch.sh
+        
+        # 验证补丁是否应用
+        if [ -f "target/linux/generic/hack-6.12/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" ]; then
+          echo "✅ Shortcut FE 内核补丁已成功应用"
+          echo "补丁内容预览:"
+          head -20 target/linux/generic/hack-6.12/953-net-patch-linux-kernel-to-support-shortcut-fe.patch
+        else
+          echo "❌ 补丁应用失败"
+          exit 1
+        fi
 
     - name: 专门检查 Shortcut FE
       run: |
