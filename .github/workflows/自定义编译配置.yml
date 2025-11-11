@@ -137,6 +137,27 @@ jobs:
         echo "添加软件包..."
         ./scripts/add-packages.sh
 
+    - name: 修复已知编译问题
+      run: |
+        echo "开始修复已知编译问题..."
+    
+        # 1. 清理真正有问题的包
+        echo "清理rtpengine包..."
+        rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
+    
+        # 2. 修复Shortcut FE而不是清理它
+        echo "修复Shortcut FE内核兼容性..."
+        if [ -d "package/qca/shortcut-fe" ]; then
+          # 应用Shortcut FE修复
+          chmod +x scripts/fix-sfe-kernel-6.12.sh
+          ./scripts/fix-sfe-kernel-6.12.sh
+        else
+          echo "Shortcut FE目录不存在，跳过修复"
+        fi
+    
+        # 3. 其他必要的修复
+        echo "检查其他可能需要修复的包..."
+
     - name: 修复 Shortcut FE 内核兼容性
       run: |
         chmod +x scripts/fix-sfe-kernel-6.12.sh
@@ -326,13 +347,10 @@ jobs:
         echo "清理已知有问题的包..."
         # 删除有问题的rtpengine包
         rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
-        
-        # 如果Shortcut FE有问题且未启用，也清理
-        if [ "${{ github.event.inputs.include_sfe }}" != "true" ] && [ "${{ github.event.inputs.turboacc_feature }}" != "with-sfe" ]; then
-          echo "清理Shortcut FE相关包..."
-          rm -rf package/qca/shortcut-fe 2>/dev/null || echo "shortcut-fe目录不存在"
-        fi
-
+    
+        # 不再清理Shortcut FE，而是通过修复来解决编译问题
+        echo "保留Shortcut FE包，将通过修复解决编译问题"
+    
     - name: 专门检查 Shortcut FE
       run: |
         chmod +x scripts/check-shortcut-fe.sh
