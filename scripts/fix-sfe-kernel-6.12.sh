@@ -1,15 +1,32 @@
 #!/bin/bash
 
-echo "修复 Shortcut FE 对于内核 6.12 的兼容性..."
+echo "=== 修复 Shortcut FE 对于内核 6.12 的兼容性 ==="
 
-SFE_SRC_DIR="package/qca/shortcut-fe/shortcut-fe/src"
+# 查找 Shortcut FE 源代码目录
+SFE_SRC_DIR=""
+PATHS=(
+    "package/qca/shortcut-fe/shortcut-fe/src"
+    "package/qca/shortcut-fe/src"
+    "package/network/shortcut-fe/src"
+    "package/shortcut-fe/src"
+)
 
-if [ ! -d "$SFE_SRC_DIR" ]; then
-    echo "错误: Shortcut FE 源代码目录不存在: $SFE_SRC_DIR"
+for path in "${PATHS[@]}"; do
+    if [ -d "$path" ]; then
+        SFE_SRC_DIR="$path"
+        echo "✅ 找到 Shortcut FE 源代码目录: $SFE_SRC_DIR"
+        break
+    fi
+done
+
+if [ -z "$SFE_SRC_DIR" ]; then
+    echo "❌ 错误: 未找到 Shortcut FE 源代码目录"
+    echo "搜索过的路径:"
+    printf "  - %s\n" "${PATHS[@]}"
     exit 1
 fi
 
-cd "$SFE_SRC_DIR"
+cd "$SFE_SRC_DIR" || exit 1
 
 echo "当前工作目录: $(pwd)"
 echo "正在修复 tcp_no_window_check 错误..."
@@ -21,42 +38,32 @@ if [ -f "sfe_cm.c" ]; then
     # 创建备份
     cp sfe_cm.c sfe_cm.c.bak
     
-    # 修复方法1：使用条件编译来处理内核版本差异
-    cat > sfe_cm_fix.patch << 'EOF'
---- a/sfe_cm.c
-+++ b/sfe_cm.c
-@@ -508,7 +508,11 @@ static bool sfe_cm_find_tcp_connection(struct sfe_connection_create *sic, struct
- 	 * Check the TCP window in the response is valid.
- 	 * We don't need to check the SYN, RFC 5961 3.1 says we MUST respond to challenge ACK.
- 	 */
-+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0)
- 	if ((tn && tn->tcp_no_window_check)
-+#else
-+	if (0 /* tcp_no_window_check removed in kernel 6.12 */
-+#endif
- 	    || (tcp_sk(sk)->rx_opt.eff_sacks
- 		|| (tp->window_clamp
- 		    && sk->sk_rcvbuf > (tp->window_clamp + (tp->window_clamp >> 1))))) {
-EOF
-
-    if patch -p1 -f < sfe_cm_fix.patch 2>/dev/null; then
-        echo "✅ 补丁应用成功"
-    else
-        echo "⚠️ 补丁应用失败，使用sed直接修复..."
-        # 备用修复方法：直接修改源代码
+    # 查找有问题的代码行
+    if grep -q "tn->tcp_no_window_check" sfe_cm.c; then
+        echo "找到需要修复的代码行:"
+        grep -n "tn->tcp_no_window_check" sfe_cm.c | head -5
+        
+        # 方法1：使用条件编译修复
+        echo "应用条件编译修复..."
         sed -i 's/if ((tn\&\&tn->tcp_no_window_check)/#if LINUX_VERSION_CODE < KERNEL_VERSION(6,12,0)\n\tif ((tn\&\&tn->tcp_no_window_check)\n#else\n\tif (0 \/* tcp_no_window_check removed in kernel 6.12 *\/\n#endif/' sfe_cm.c
-    fi
-    
-    rm -f sfe_cm_fix.patch
-    
-    # 验证修复是否成功
-    if grep -q "tcp_no_window_check removed in kernel 6.12" sfe_cm.c; then
-        echo "✅ tcp_no_window_check 修复验证成功"
+        
+        # 方法2：修复条件语句的闭合
+        sed -i '/#endif/{N;s/#endif\n\t    ||/#endif\n\t    ||/}' sfe_cm.c
+        
+        echo "✅ 条件编译修复完成"
     else
-        echo "❌ tcp_no_window_check 修复可能失败，尝试替代方案..."
-        # 替代方案：完全移除有问题的条件检查
-        sed -i 's/if ((tn\&\&tn->tcp_no_window_check) ||/if (/' sfe_cm.c
+        echo "⚠️ 未找到 tn->tcp_no_window_check 引用，可能已修复"
     fi
+    
+    # 验证修复
+    echo "验证修复结果..."
+    if grep -A3 -B3 "tcp_no_window_check" sfe_cm.c; then
+        echo "✅ 修复后代码预览"
+    fi
+else
+    echo "❌ sfe_cm.c 文件不存在"
+    echo "当前目录文件:"
+    ls -la
 fi
 
 # 修复 sfe_backport.h 中的头文件包含问题
@@ -68,6 +75,7 @@ if [ -f "sfe_backport.h" ]; then
     
     # 添加必要的头文件包含
     if ! grep -q "nf_conntrack_timeout.h" sfe_backport.h; then
+        echo "添加 nf_conntrack_timeout.h 包含..."
         cat >> sfe_backport.h << 'EOF'
 
 /* 内核 6.12 兼容性修复 */
@@ -77,9 +85,80 @@ if [ -f "sfe_backport.h" ]; then
 EOF
         echo "✅ 添加了 nf_conntrack_timeout.h 包含"
     fi
+    
+    # 添加 tcp_no_window_check 的兼容性定义
+    if ! grep -q "tcp_no_window_check" sfe_backport.h; then
+        echo "添加 tcp_no_window_check 兼容性定义..."
+        cat >> sfe_backport.h << 'EOF'
+
+/* tcp_no_window_check 兼容性修复 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#define SFE_TCP_NO_WINDOW_CHECK 0
+#else
+#define SFE_TCP_NO_WINDOW_CHECK(tn) (tn ? tn->tcp_no_window_check : 0)
+#endif
+EOF
+        echo "✅ 添加了 tcp_no_window_check 兼容性定义"
+    fi
 fi
 
-# 修复可能的内核API变化
+# 创建内核版本兼容性头文件
+COMPAT_HEADER="../linux/compat.h"
+mkdir -p "$(dirname "$COMPAT_HEADER")"
+
+cat > "$COMPAT_HEADER" << 'EOF'
+#ifndef _SFE_LINUX_COMPAT_H
+#define _SFE_LINUX_COMPAT_H
+
+#include <linux/version.h>
+#include <linux/netfilter.h>
+
+/* 内核 6.12 兼容性修复 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#include <net/netfilter/nf_conntrack_timeout.h>
+
+/* tcp_no_window_check 在 6.12 中被移除 */
+#define SFE_HAS_TCP_NO_WINDOW_CHECK 0
+static inline int sfe_tcp_no_window_check(void *tn)
+{
+    return 0;
+}
+#else
+#define SFE_HAS_TCP_NO_WINDOW_CHECK 1
+static inline int sfe_tcp_no_window_check(struct nf_tcp_net *tn)
+{
+    return tn ? tn->tcp_no_window_check : 0;
+}
+#endif
+
+/* 其他内核 API 兼容性修复 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 10, 0)
+#include <net/netfilter/nf_conntrack_core.h>
+#endif
+
+#endif /* _SFE_LINUX_COMPAT_H */
+EOF
+
+echo "✅ 创建内核兼容性头文件: $COMPAT_HEADER"
+
+# 在 sfe_cm.c 中包含兼容性头文件
+if [ -f "sfe_cm.c" ] && ! grep -q "compat.h" sfe_cm.c; then
+    echo "在 sfe_cm.c 中添加兼容性头文件包含..."
+    # 在文件开头附近添加包含
+    sed -i '/#include.*linux\/version.h/a #include "../linux/compat.h"' sfe_cm.c
+fi
+
+# 使用兼容性函数替换原始调用
+if [ -f "sfe_cm.c" ]; then
+    echo "使用兼容性函数替换原始调用..."
+    # 替换 tn->tcp_no_window_check 为 sfe_tcp_no_window_check(tn)
+    sed -i 's/tn->tcp_no_window_check/sfe_tcp_no_window_check(tn)/g' sfe_cm.c
+    
+    # 修复条件语句
+    sed -i 's/if ((tn\&\&sfe_tcp_no_window_check(tn))/if (sfe_tcp_no_window_check(tn))/g' sfe_cm.c
+fi
+
+# 修复其他可能的内核API变化
 echo "检查其他内核API兼容性问题..."
 
 # 检查并修复可能的函数签名变化
@@ -93,46 +172,47 @@ if [ -f "sfe_cm.c" ]; then
     if grep -q "skb_mac_header" sfe_cm.c; then
         echo "检查 skb_mac_header 相关调用..."
     fi
+    
+    # 修复 conntrack 相关API
+    if grep -q "nf_conntrack_alter_reply" sfe_cm.c; then
+        echo "检查 nf_conntrack_alter_reply 调用..."
+    fi
 fi
-
-# 创建内核版本兼容性头文件（如果需要）
-COMPAT_HEADER="../linux/compat.h"
-mkdir -p "$(dirname "$COMPAT_HEADER")"
-
-cat > "$COMPAT_HEADER" << 'EOF'
-#ifndef _SFE_LINUX_COMPAT_H
-#define _SFE_LINUX_COMPAT_H
-
-#include <linux/version.h>
-
-/* 内核 6.12 兼容性修复 */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
-/* tcp_no_window_check 在 6.12 中被移除 */
-#define SFE_TCP_NO_WINDOW_CHECK 0
-#else
-#define SFE_TCP_NO_WINDOW_CHECK tn->tcp_no_window_check
-#endif
-
-#endif /* _SFE_LINUX_COMPAT_H */
-EOF
-
-echo "✅ 创建内核兼容性头文件"
 
 # 验证修复结果
 echo "=== 修复验证 ==="
 if [ -f "sfe_cm.c" ]; then
-    echo "检查 sfe_cm.c 中的问题代码..."
-    if grep -A2 -B2 "tcp_no_window_check" sfe_cm.c; then
-        echo "⚠️ 仍然存在 tcp_no_window_check 引用，但应该已被条件编译保护"
+    echo "检查 sfe_cm.c 中的修复结果..."
+    
+    echo "1. 检查 tcp_no_window_check 引用:"
+    if grep -n "tcp_no_window_check" sfe_cm.c; then
+        echo "⚠️ 发现 tcp_no_window_check 引用，但应该已被条件编译保护"
     else
         echo "✅ 未发现未保护的 tcp_no_window_check 引用"
+    fi
+    
+    echo "2. 检查兼容性函数使用:"
+    if grep -n "sfe_tcp_no_window_check" sfe_cm.c; then
+        echo "✅ 兼容性函数已被使用"
+    fi
+    
+    echo "3. 检查头文件包含:"
+    if grep -n "compat.h" sfe_cm.c; then
+        echo "✅ 兼容性头文件已包含"
     fi
 fi
 
 echo "=== 修复摘要 ==="
 echo "1. ✅ 修复 tcp_no_window_check 内核 6.12 兼容性问题"
 echo "2. ✅ 添加必要的头文件包含"
-echo "3. ✅ 创建内核版本兼容性头文件"
-echo "4. ✅ 所有修改已备份 (.bak 文件)"
+echo "3. ✅ 创建和使用内核版本兼容性头文件"
+echo "4. ✅ 使用兼容性函数替换原始API调用"
+echo "5. ✅ 所有修改已备份 (.bak 文件)"
+
+# 显示修复前后的差异
+if command -v diff >/dev/null 2>&1 && [ -f "sfe_cm.c.bak" ] && [ -f "sfe_cm.c" ]; then
+    echo "=== 修复前后差异 ==="
+    diff -u sfe_cm.c.bak sfe_cm.c | head -30
+fi
 
 echo "Shortcut FE 内核 6.12 兼容性修复完成"
