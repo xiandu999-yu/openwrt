@@ -19,7 +19,7 @@ on:
         description: '是否包含Shortcut FE加速'
         type: boolean
         required: false
-        default: false
+        default: true
       turboacc_feature:  # TurboACC功能
         description: '选择TurboACC功能配置'
         type: choice
