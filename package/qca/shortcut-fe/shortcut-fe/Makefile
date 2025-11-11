@@ -18,6 +18,14 @@ include $(INCLUDE_DIR)/kernel.mk
 PKG_NAME:=shortcut-fe
 PKG_RELEASE:=9
 
+# 内核版本兼容性检查
+ifeq ($(LINUX_VERSION),6.12.0)
+  # 针对内核 6.12 的特殊配置
+  PKG_BUILD_DEPENDS += kernel
+  # 添加内核 6.12 特定的编译标志
+  EXTRA_CFLAGS += -DLINUX_VERSION_6_12
+endif
+
 include $(INCLUDE_DIR)/package.mk
 
 define KernelPackage/shortcut-fe
