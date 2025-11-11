@@ -17,6 +17,24 @@
 
 #include <linux/version.h>
 
+/* 内核 6.12 特定修复 */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#include <net/netfilter/nf_conntrack_timeout.h>
+
+/* 修复 netfilter API 变化 */
+#ifndef NF_HOOK
+#define NF_HOOK(pf, hook, net, sk, skb, indev, outdev, okfn) \
+	NF_HOOK_THRESH(pf, hook, net, sk, skb, indev, outdev, okfn, INT_MIN)
+#endif
+
+/* 修复可能的网络设备 API 变化 */
+#ifndef NETDEV_TX_OK
+#define NETDEV_TX_OK 0
+#endif
+
+#endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0) */
+
+/* 标准兼容性代码 */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 7, 0))
 #include <net/netfilter/nf_conntrack_timeout.h>
@@ -49,6 +67,7 @@ nf_ct_timeout_lookup(struct net *net, struct nf_conn *ct,
 #endif /*KERNEL_VERSION(3, 7, 0)*/
 #endif /*KERNEL_VERSION(3, 4, 0)*/
 
+/* netfilter hook 定义 - 统一处理 */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 4, 0))
 #define sfe_define_post_routing_hook(FN_NAME, HOOKNUM, OPS, SKB, UNUSED, OUT, OKFN) \
 static unsigned int FN_NAME(void *priv, \
@@ -186,7 +205,7 @@ int sfe_cm_device_event(struct notifier_block *this, unsigned long event, void *
 #endif
 
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 4, 0))
-#define sfe_dst_get_neighbour(dst, daddr) dst_neigh_lookup(dst, addr)
+#define sfe_dst_get_neighbour(dst, daddr) dst_neigh_lookup(dst, daddr)
 #else
 static inline struct neighbour *
 sfe_dst_get_neighbour(struct dst_entry *dst, void *daddr)
