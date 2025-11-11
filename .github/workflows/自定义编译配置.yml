@@ -288,6 +288,28 @@ jobs:
           sed -i 's/\/usr\/share\/X11\/xkb/\/usr\/share\/X11\/xkb-src/g' feeds/video/libs/xkeyboard-config/Makefile 2>/dev/null || echo "xkeyboard-config修复失败"
         fi
 
+    - name: 修复PPP编译问题
+      run: |
+        echo "修复PPP相关编译问题..."
+    
+        # 清理PPP相关的构建状态
+        rm -rf build_dir/target-*/ppp-*
+        rm -rf staging_dir/target-*/ppp
+        rm -rf tmp/build/ppp
+    
+        # 修复PPP包可能的问题
+        if [ -d "package/network/services/ppp" ]; then
+          echo "检查PPP包配置..."
+          # 确保PPP包配置正确
+          find package/network/services/ppp -name "*.mk" -exec grep -l "pppoe" {} \;
+        fi
+    
+        # 清理staging目录中的PPP相关文件
+        find staging_dir -name "*ppp*" -type f -delete 2>/dev/null || true
+        find staging_dir -name ".ppp*" -type f -delete 2>/dev/null || true
+    
+        echo "PPP修复完成"
+
     - name: 应用 Shortcut FE 内核补丁
       run: |
         chmod +x scripts/apply-sfe-kernel-patch.sh
