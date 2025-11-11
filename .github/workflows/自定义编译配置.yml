@@ -1,4 +1,3 @@
-
 name: 自定义编译配置
 
 on:
@@ -179,17 +178,26 @@ jobs:
           echo "选择NanoPi R6S配置"
         fi
         
-        # 内核模块配置 - 启用所有kmods
+        # 禁用有问题的包 - 使用正确的配置语法
+        echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
+        echo "# CONFIG_PACKAGE_rtpengine-full is not set" >> .config
+        echo "# CONFIG_PACKAGE_rtpengine-no-transcode is not set" >> .config
+        
+        # 禁用有问题的telephony feed包
+        echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
+        echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
+        
+        # 内核模块配置
         echo "CONFIG_ALL_KMODS=y" >> .config
         echo "CONFIG_ALL_NONSHARED=n" >> .config
         
         # 启用APK包管理
         echo "CONFIG_USE_APK=y" >> .config
         
-        # 修复 Python 依赖
+        # Python 支持
         echo "CONFIG_PACKAGE_python3=y" >> .config
         echo "CONFIG_PACKAGE_python3-light=y" >> .config
-        echo "CONFIG_PACKAGE_python3-distutils=y" >> .config  # 改为y确保编译
+        echo "CONFIG_PACKAGE_python3-distutils=y" >> .config
         
         # Lua 支持
         echo "CONFIG_PACKAGE_lua=y" >> .config
@@ -249,13 +257,17 @@ jobs:
         echo "CONFIG_PACKAGE_luci-app-turboacc=m" >> .config
         echo "CONFIG_PACKAGE_nft-fullcone=m" >> .config
         
-        # 根据参数调整配置
+        # 根据参数调整Shortcut FE配置
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ] || [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
           echo "启用完整的 Shortcut FE..."
-          # 使用正确的包路径
           echo "CONFIG_PACKAGE_kmod-shortcut-fe=m" >> .config
           echo "CONFIG_PACKAGE_kmod-fast-classifier=m" >> .config
           echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=m" >> .config
+        else
+          echo "禁用 Shortcut FE..."
+          echo "# CONFIG_PACKAGE_kmod-shortcut-fe is not set" >> .config
+          echo "# CONFIG_PACKAGE_kmod-fast-classifier is not set" >> .config
+          echo "# CONFIG_PACKAGE_kmod-shortcut-fe-drv is not set" >> .config
         fi
         
         # 系统工具
@@ -276,11 +288,6 @@ jobs:
         echo "CONFIG_PACKAGE_wget=m" >> .config
         echo "CONFIG_PACKAGE_iputils-ping=m" >> .config
         echo "CONFIG_PACKAGE_iputils-traceroute=m" >> .config
-        
-        # 禁用有问题的包
-        echo "CONFIG_PACKAGE_rtpengine=n" >> .config
-        echo "CONFIG_PACKAGE_rtpengine-full=n" >> .config
-        echo "CONFIG_PACKAGE_rtpengine-no-transcode=n" >> .config
         
         # 仅内置最基础的系统组件
         echo "CONFIG_PACKAGE_base-files=y" >> .config
@@ -309,34 +316,36 @@ jobs:
         echo "编译策略: 全kmods + 模块化插件" >> version-info.txt
         cat version-info.txt
 
-    - name: 构建固件（充分利用硬件）
+    - name: 清理有问题的包
       run: |
-        echo "=== 高性能编译配置 ==="
-        echo "硬件: 4核心 AMD EPYC + 15GB 内存"
+        echo "清理已知有问题的包..."
+        # 删除有问题的rtpengine包
+        rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
+        
+        # 如果Shortcut FE有问题且未启用，也清理
+        if [ "${{ github.event.inputs.include_sfe }}" != "true" ] && [ "${{ github.event.inputs.turboacc_feature }}" != "with-sfe" ]; then
+          echo "清理Shortcut FE相关包..."
+          rm -rf package/qca/shortcut-fe 2>/dev/null || echo "shortcut-fe目录不存在"
+        fi
+
+    - name: 构建固件（单线程编译）
+      run: |
+        echo "=== 开始编译固件 ==="
+        echo "使用单线程编译以避免依赖问题"
         
         # 创建构建日志目录
         mkdir -p logs
         
-        # 分阶段优化配置
-        {
-            echo "阶段1: 下载软件包 (4线程)"
-            make download -j4
-            
-            echo "阶段2: 编译工具链 (3线程)"
-            make toolchain/compile -j3
-            make toolchain/install -j3
-            
-            echo "阶段3: 编译内核模块 (3线程)"
-            make target/linux/compile -j3
-            
-            echo "阶段4: 编译软件包 (3线程)"
-            make package/compile -j3
-            
-            echo "阶段5: 生成固件镜像 (2线程)"
-            make -j2 V=s
-        } 2>&1 | tee logs/build-optimized.log
+        # 单线程编译，确保错误可见
+        make -j1 V=s 2>&1 | tee logs/build-detailed.log
         
-        echo "✅ 编译完成！资源利用率最大化"
+        # 如果第一次失败，尝试重新编译
+        if [ ${PIPESTATUS[0]} -ne 0 ]; then
+          echo "第一次编译失败，尝试重新编译..."
+          make -j1 V=s 2>&1 | tee logs/build-retry.log
+        fi
+        
+        echo "✅ 编译完成！"
 
     - name: 生成软件包索引
       run: |
@@ -363,7 +372,8 @@ jobs:
         # 复制日志和配置文件
         cp version-info.txt upload/
         cp .config upload/ 2>/dev/null || echo ".config 不存在"
-        cp logs/build-optimized.log upload/logs/ 2>/dev/null || echo "构建日志不存在"
+        cp logs/build-detailed.log upload/logs/ 2>/dev/null || echo "构建日志不存在"
+        cp logs/build-retry.log upload/logs/ 2>/dev/null || echo "重试日志不存在"
         
         # 检查文件是否存在
         echo "=== 准备上传的文件 ==="
