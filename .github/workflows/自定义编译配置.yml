@@ -328,6 +328,11 @@ jobs:
           rm -rf package/qca/shortcut-fe 2>/dev/null || echo "shortcut-fe目录不存在"
         fi
 
+    - name: 专门检查 Shortcut FE
+      run: |
+        chmod +x scripts/check-shortcut-fe.sh
+        ./scripts/check-shortcut-fe.sh
+        
     - name: 构建固件（单线程编译）
       run: |
         echo "=== 开始编译固件 ==="
