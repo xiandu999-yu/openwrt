@@ -124,6 +124,97 @@ jobs:
         python3 -m pip install --upgrade pip
         python3 -m pip install pyelftools cffi
 
+    - name: 备份原始 feeds 配置
+      run: |
+        cp feeds.conf.default feeds.conf.original
+        echo "原始 feeds.conf 已备份"
+
+    - name: 配置备用 feeds 源
+      run: |
+        echo "配置备用 feeds 源..."
+        # 创建使用镜像源的 feeds.conf
+        cat > feeds.conf << 'EOF'
+        src-git packages https://github.com/openwrt/packages.git;openwrt-24.04
+        src-git luci https://github.com/openwrt/luci.git;openwrt-24.04
+        src-git routing https://github.com/openwrt/routing.git;openwrt-24.04
+        src-git telephony https://github.com/openwrt/telephony.git;openwrt-24.04
+        src-git video https://github.com/openwrt/video.git
+        # src-git targets https://github.com/openwrt/targets.git
+        # src-git oldpackages http://git.openwrt.org/packages.git
+        # src-link custom /usr/src/openwrt/custom-feed
+        EOF
+        
+        echo "备用 feeds.conf 内容:"
+        cat feeds.conf
+
+    - name: 更新软件源（带重试机制）
+      run: |
+        echo "开始更新软件源（带重试机制）..."
+        mkdir -p logs
+        
+        # 重试函数
+        retry_update() {
+          local max_attempts=3
+          local attempt=1
+          local wait_time=10
+            
+          while [ $attempt -le $max_attempts ]; do
+            echo "尝试 $attempt/$max_attempts: 更新 feeds..."
+            if ./scripts/feeds update -a 2>&1 | tee logs/feeds-update-attempt-$attempt.log; then
+              echo "✅ feeds 更新成功！"
+              return 0
+            else
+              echo "❌ 尝试 $attempt 失败，等待 ${wait_time}秒后重试..."
+              sleep $wait_time
+              ((attempt++))
+              ((wait_time*=2))
+            fi
+          done
+          
+          echo "❌ 所有重试都失败了，尝试使用 GitHub 镜像源..."
+          return 1
+        }
+        
+        # 首先尝试使用备用源更新
+        if retry_update; then
+          echo "✅ 使用备用源更新成功"
+        else
+          echo "尝试直接使用 GitHub 源..."
+          # 直接使用 GitHub 源更新各个 feed
+          for feed in packages luci routing telephony; do
+            echo "更新 $feed..."
+            if [ -d "feeds/$feed" ]; then
+              rm -rf "feeds/$feed"
+            fi
+            git clone --depth=1 "https://github.com/openwrt/$feed.git" "feeds/$feed" 2>&1 | tee logs/feeds-$feed-clone.log || echo "克隆 $feed 失败，继续..."
+          done
+        fi
+        
+        echo "Feeds 更新完成"
+
+    - name: 安装 feeds 包
+      run: |
+        echo "安装 feeds 包..."
+        mkdir -p logs
+        
+        # 检查 feeds 目录是否存在
+        echo "检查 feeds 目录状态:"
+        for feed in packages luci routing telephony video; do
+          if [ -d "feeds/$feed" ]; then
+            echo "✅ feeds/$feed 存在"
+          else
+            echo "❌ feeds/$feed 不存在"
+          fi
+        done
+        
+        # 安装 feeds
+        echo "开始安装 feeds..."
+        if ./scripts/feeds install -a 2>&1 | tee logs/feeds-install.log; then
+          echo "✅ feeds 安装成功"
+        else
+          echo "⚠️ feeds 安装过程中有错误，但继续执行..."
+        fi
+
     - name: 应用自定义修改
       run: |
         chmod +x scripts/*.sh
@@ -165,8 +256,17 @@ jobs:
           echo "Shortcut FE目录不存在，跳过修复"
         fi
     
-        # 3. 其他必要的修复
-        echo "检查其他可能需要修复的包..."
+        # 3. 修复 video feed 中的问题
+        echo "修复 video feed 编译问题..."
+        if [ -f "feeds/video/libs/mesa/Makefile" ]; then
+          echo "修复 mesa Makefile..."
+          sed -i 's/^define Package\/mesa\/install$/define Package\/mesa\/install-bin/g' feeds/video/libs/mesa/Makefile 2>/dev/null || echo "mesa修复失败"
+        fi
+        
+        if [ -f "feeds/video/libs/xkeyboard-config/Makefile" ]; then
+          echo "修复 xkeyboard-config Makefile..."
+          sed -i 's/\/usr\/share\/X11\/xkb/\/usr\/share\/X11\/xkb-src/g' feeds/video/libs/xkeyboard-config/Makefile 2>/dev/null || echo "xkeyboard-config修复失败"
+        fi
 
     - name: 修复 Shortcut FE 内核兼容性
       run: |
@@ -199,11 +299,6 @@ jobs:
             fi
         done
 
-    - name: 更新软件源
-      run: |
-        ./scripts/feeds update -a
-        ./scripts/feeds install -a
-
     - name: 配置编译参数
       run: |
         if [ "${{ github.event.inputs.target_device }}" = "nanopi-r3s" ]; then
@@ -222,6 +317,10 @@ jobs:
         # 禁用有问题的telephony feed包
         echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
         echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
+        
+        # 禁用有问题的 video feed 包
+        echo "# CONFIG_PACKAGE_mesa is not set" >> .config
+        echo "# CONFIG_PACKAGE_xkeyboard-config is not set" >> .config
         
         # 内核模块配置
         echo "CONFIG_ALL_KMODS=y" >> .config
