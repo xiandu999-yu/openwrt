@@ -295,17 +295,17 @@ jobs:
         make defconfig
         echo "✅ 基础配置完成"
 
-    # ==================== 步骤2: 应用内核配置 ====================
-    - name: 应用内核配置
+    # ==================== 步骤3: 启用基础包和修复依赖 ====================
+    - name: 启用基础包和修复依赖
       run: |
-        echo "=== 步骤2: 应用内核配置 ==="
-        chmod +x scripts/apply-kernel-config.sh
-        ./scripts/apply-kernel-config.sh
+        echo "=== 步骤3: 启用基础包和修复依赖 ==="
+        chmod +x scripts/enable-all-kmods.sh
+        ./scripts/enable-all-kmods.sh
         
-        # 验证内核配置
-        echo "=== 内核配置验证 ==="
-        make kernel_oldconfig
-        echo "✅ 内核配置完成"
+        # 验证配置
+        echo "=== 配置验证 ==="
+        make oldconfig
+        echo "✅ 包配置完成"
 
     # ==================== 步骤3: 启用所有内核包 ====================
     - name: 启用所有内核包
