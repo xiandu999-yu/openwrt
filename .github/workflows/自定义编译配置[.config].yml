@@ -1,0 +1,434 @@
+name: 自定义编译配置[.config]
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # 每天UTC时间4点编译
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      target_device:  # 目标设备
+        description: '选择编译目标设备'
+        required: true
+        default: 'nanopi-r3s'
+        type: choice
+        options:
+          - nanopi-r3s
+          - nanopi-r6s
+      include_sfe:  # 包含SFE加速
+        description: '是否包含Shortcut FE加速'
+        type: boolean
+        required: false
+        default: true
+      turboacc_feature:  # TurboACC功能
+        description: '选择TurboACC功能配置'
+        required: false
+        default: 'fullcone-only'
+        type: choice
+        options:
+          - fullcone-only
+          - with-sfe
+      compile_threads:  # 编译线程数
+        description: '选择编译线程数 (单线程更稳定，多线程更快)'
+        required: false
+        default: 'single'
+        type: choice
+        options:
+          - single
+          - multi
+      build_mode:  # 编译模式
+        description: '选择编译模式 (firmware=全kmods+固件, full=全kmods+固件+全插件)'
+        required: false
+        default: 'firmware'
+        type: choice
+        options:
+          - firmware
+          - full
+      include_istore:  # 包含iStore
+        description: '是否包含iStore相关功能'
+        type: boolean
+        required: false
+        default: true
+
+env:
+  TIMEOUT: 120m
+
+jobs:
+  config:  # 只生成配置
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2小时超时上限
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+        fetch-depth: 0
+
+    - name: 设置构建缓存
+      uses: actions/cache@v3
+      with:
+        path: |
+          dl
+          build_dir
+          staging_dir
+          tmp
+          .config
+          feeds
+        key: ${{ runner.os }}-openwrt-${{ hashFiles('configs/*.config', 'feeds.conf', '.config', 'scripts/*.sh') }}
+        restore-keys: |
+          ${{ runner.os }}-openwrt-
+
+    - name: 安装系统依赖
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          clang \
+          flex \
+          bison \
+          g++ \
+          gawk \
+          gcc-multilib \
+          g++-multilib \
+          gettext \
+          git \
+          libncurses5-dev \
+          libssl-dev \
+          python3 \
+          python3-pip \
+          python3-setuptools \
+          python3-dev \
+          python3-serial \
+          unzip \
+          zlib1g-dev \
+          file \
+          wget \
+          rsync \
+          libelf-dev
+
+    - name: 检查系统信息
+      run: |
+        echo "=== GitHub Actions 运行器系统信息 ==="
+        echo "操作系统: $(lsb_release -d | cut -f2)"
+        echo "内核版本: $(uname -r)"
+        echo "系统架构: $(uname -m)"
+        echo ""
+        echo "=== CPU 信息 ==="
+        echo "CPU 型号: $(grep 'model name' /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs)"
+        echo "CPU 核心数: $(nproc)"
+        echo "CPU 线程数: $(grep -c '^processor' /proc/cpuinfo)"
+        echo "CPU 频率: $(grep 'cpu MHz' /proc/cpuinfo | head -1 | cut -d':' -f2 | xargs) MHz"
+        echo ""
+        echo "=== 环境信息 ==="
+        echo "运行器: ${{ runner.os }}"
+        echo "工作目录: ${{ github.workspace }}"
+        echo "编译线程模式: ${{ github.event.inputs.compile_threads }}"
+        echo "编译模式: ${{ github.event.inputs.build_mode }}"
+        echo "包含iStore: ${{ github.event.inputs.include_istore }}"
+        echo "目标: 仅生成 .config 文件"
+        echo ""
+
+    - name: 安装Python依赖
+      run: |
+        python3 -m pip install --upgrade pip
+        python3 -m pip install pyelftools cffi
+
+    - name: 备份原始 feeds 配置
+      run: |
+        cp feeds.conf.default feeds.conf.original
+        echo "原始 feeds.conf 已备份"
+
+    - name: 配置备用 feeds 源
+      run: |
+        echo "配置备用 feeds 源..."
+        cat > feeds.conf << 'EOF'
+        src-git packages https://github.com/openwrt/packages.git
+        src-git luci https://github.com/openwrt/luci.git
+        src-git routing https://github.com/openwrt/routing.git
+        src-git telephony https://github.com/openwrt/telephony.git
+        src-git video https://github.com/openwrt/video.git
+        EOF
+        echo "备用 feeds.conf 内容:"
+        cat feeds.conf
+
+    - name: 更新软件源（带重试机制）
+      run: |
+        echo "开始更新软件源（带重试机制）..."
+        mkdir -p logs
+        
+        retry_update() {
+          local max_attempts=3
+          local attempt=1
+          local wait_time=10
+            
+          while [ $attempt -le $max_attempts ]; do
+            echo "尝试 $attempt/$max_attempts: 更新 feeds..."
+            if ./scripts/feeds update -a 2>&1 | tee logs/feeds-update-attempt-$attempt.log; then
+              echo "✅ feeds 更新成功！"
+              return 0
+            else
+              echo "❌ 尝试 $attempt 失败，等待 ${wait_time}秒后重试..."
+              sleep $wait_time
+              ((attempt++))
+              ((wait_time*=2))
+            fi
+          done
+          
+          echo "❌ 所有重试都失败了，尝试使用 GitHub 镜像源..."
+          return 1
+        }
+        
+        if retry_update; then
+          echo "✅ 使用备用源更新成功"
+        else
+          echo "尝试直接使用 GitHub 源..."
+          for feed in packages luci routing telephony; do
+            echo "更新 $feed..."
+            if [ -d "feeds/$feed" ]; then
+              rm -rf "feeds/$feed"
+            fi
+            git clone --depth=1 "https://github.com/openwrt/$feed.git" "feeds/$feed" 2>&1 | tee logs/feeds-$feed-clone.log || echo "克隆 $feed 失败，继续..."
+          done
+        fi
+        
+        echo "Feeds 更新完成"
+
+    - name: 安装 feeds 包
+      run: |
+        echo "安装 feeds 包..."
+        mkdir -p logs
+        
+        echo "检查 feeds 目录状态:"
+        for feed in packages luci routing telephony video; do
+          if [ -d "feeds/$feed" ]; then
+            echo "✅ feeds/$feed 存在"
+          else
+            echo "❌ feeds/$feed 不存在"
+          fi
+        done
+        
+        echo "开始安装 feeds..."
+        if ./scripts/feeds install -a 2>&1 | tee logs/feeds-install.log; then
+          echo "✅ feeds 安装成功"
+        else
+          echo "⚠️ feeds 安装过程中有错误，但继续执行..."
+        fi
+
+    # ==================== 步骤1: 基础配置 ====================
+    - name: 配置编译参数
+      run: |
+        echo "=== 步骤1: 基础配置 ==="
+        if [ "${{ github.event.inputs.target_device }}" = "nanopi-r3s" ]; then
+          cp configs/nanopi-r3s.config .config
+          echo "选择NanoPi R3S配置"
+        else
+          cp configs/nanopi-r6s.config .config
+          echo "选择NanoPi R6S配置"
+        fi
+        
+        # 强制启用全kmods编译
+        echo "CONFIG_ALL_KMODS=y" >> .config
+        echo "CONFIG_ALL_NONSHARED=n" >> .config
+        
+        # 禁用有问题的包
+        echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
+        echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
+        echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
+        echo "# CONFIG_PACKAGE_mesa is not set" >> .config
+        echo "# CONFIG_PACKAGE_xkeyboard-config is not set" >> .config
+        
+        # 基础系统配置
+        echo "CONFIG_USE_APK=y" >> .config
+        
+        # 修复缺失依赖
+        echo "添加缺失的依赖包..."
+        echo "CONFIG_PACKAGE_coreutils=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-sort=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-od=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-stat=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-tee=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-mktemp=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-chroot=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-sha1sum=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-sleep=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-date=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-timeout=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-dirname=y" >> .config
+        echo "CONFIG_PACKAGE_coreutils-stty=y" >> .config
+        echo "CONFIG_PACKAGE_libpam=y" >> .config
+        echo "CONFIG_PACKAGE_libtirpc=y" >> .config
+        echo "CONFIG_PACKAGE_python3-distutils=y" >> .config
+        echo "CONFIG_PACKAGE_python3-lib2to3=y" >> .config
+        echo "CONFIG_PACKAGE_luci-lua-runtime=y" >> .config
+        
+        # TurboACC配置
+        echo "CONFIG_PACKAGE_luci-app-turboacc=m" >> .config
+        echo "CONFIG_PACKAGE_nft-fullcone=m" >> .config
+        
+        # 根据选项配置Shortcut FE
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+          echo "启用Shortcut FE内核模块..."
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe=m" >> .config
+          echo "CONFIG_PACKAGE_kmod-fast-classifier=m" >> .config
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=m" >> .config
+        else
+          echo "禁用Shortcut FE内核模块..."
+          echo "# CONFIG_PACKAGE_kmod-shortcut-fe is not set" >> .config
+          echo "# CONFIG_PACKAGE_kmod-fast-classifier is not set" >> .config
+          echo "# CONFIG_PACKAGE_kmod-shortcut-fe-drv is not set" >> .config
+        fi
+        
+        # 根据编译模式配置
+        if [ "${{ github.event.inputs.build_mode }}" = "full" ]; then
+          echo "编译模式: 全kmods+固件+全插件"
+          echo "CONFIG_PACKAGE_curl=m" >> .config
+          echo "CONFIG_PACKAGE_bash=m" >> .config
+          echo "CONFIG_PACKAGE_htop=m" >> .config
+          echo "CONFIG_PACKAGE_nano=m" >> .config
+          echo "CONFIG_PACKAGE_vim=m" >> .config
+          echo "CONFIG_PACKAGE_tar=m" >> .config
+        else
+          echo "编译模式: 全kmods+固件"
+        fi
+        
+        # iStore相关配置
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "启用 iStore 相关包..."
+          echo "CONFIG_PACKAGE_luci-app-istorex=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-quickstart=m" >> .config
+          echo "CONFIG_PACKAGE_luci-app-store=m" >> .config
+          echo "CONFIG_PACKAGE_luci-lib-taskd=m" >> .config
+          echo "CONFIG_PACKAGE_quickstart=m" >> .config
+          echo "CONFIG_PACKAGE_luci-lib-xterm=m" >> .config
+          echo "CONFIG_PACKAGE_taskd=m" >> .config
+        else
+          echo "禁用 iStore 相关包..."
+          echo "# CONFIG_PACKAGE_luci-app-istorex is not set" >> .config
+          echo "# CONFIG_PACKAGE_luci-app-quickstart is not set" >> .config
+          echo "# CONFIG_PACKAGE_luci-app-store is not set" >> .config
+          echo "# CONFIG_PACKAGE_luci-lib-taskd is not set" >> .config
+          echo "# CONFIG_PACKAGE_quickstart is not set" >> .config
+          echo "# CONFIG_PACKAGE_luci-lib-xterm is not set" >> .config
+          echo "# CONFIG_PACKAGE_taskd is not set" >> .config
+        fi
+        
+        # 应用基础配置
+        make defconfig
+        echo "✅ 基础配置完成"
+
+    # ==================== 步骤2: 启用所有内核功能 ====================
+    - name: 启用所有内核功能
+      run: |
+        echo "=== 步骤2: 启用所有内核模块和功能 ==="
+        chmod +x scripts/enable-all-kmods.sh
+        ./scripts/enable-all-kmods.sh
+        
+        # 验证配置
+        echo "=== 配置验证 ==="
+        make oldconfig
+        echo "✅ 内核功能配置完成"
+
+    # ==================== 步骤3: 验证内核配置 ====================
+    - name: 验证内核配置
+      run: |
+        echo "=== 步骤3: 验证内核配置 ==="
+        chmod +x scripts/verify-kernel-config.sh
+        ./scripts/verify-kernel-config.sh
+
+    # ==================== 步骤4: 应用自定义修改 ====================
+    - name: 应用自定义修改
+      run: |
+        echo "=== 步骤4: 应用自定义修改 ==="
+        chmod +x scripts/*.sh
+        echo "应用基础补丁..."
+        ./scripts/apply-custom-patches.sh
+        
+        echo "修复 python 依赖..."
+        ./scripts/fix-dependencies.sh
+        
+        echo "集成TurboACC功能..."
+        if [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
+          echo "包含SFE加速 - 使用官方脚本自动处理依赖"
+          curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash
+        else
+          echo "仅Fullcone NAT - 使用官方脚本自动处理依赖"  
+          curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash -s -- --no-sfe
+        fi
+        
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "添加iStore相关软件包..."
+          ./scripts/add-packages.sh
+        else
+          echo "跳过iStore相关软件包..."
+        fi
+
+        # 重新应用配置以确保一致性
+        make defconfig
+        echo "✅ 自定义修改完成"
+
+    # ==================== 步骤5: 生成最终配置 ====================
+    - name: 生成最终配置
+      run: |
+        echo "=== 步骤5: 生成最终配置 ==="
+        
+        # 最终配置验证
+        make oldconfig
+        
+        # 生成配置报告
+        echo "=== 最终配置统计 ===" > config-report.txt
+        echo "生成时间: $(date '+%Y-%m-%d %H:%M:%S')" >> config-report.txt
+        echo "目标设备: ${{ github.event.inputs.target_device }}" >> config-report.txt
+        echo "TurboACC功能: ${{ github.event.inputs.turboacc_feature }}" >> config-report.txt
+        echo "包含SFE: ${{ github.event.inputs.include_sfe }}" >> config-report.txt
+        echo "编译模式: ${{ github.event.inputs.build_mode }}" >> config-report.txt
+        echo "包含iStore: ${{ github.event.inputs.include_istore }}" >> config-report.txt
+        echo "" >> config-report.txt
+        echo "配置项统计:" >> config-report.txt
+        echo "总配置项: $(grep -c "^CONFIG_" .config)" >> config-report.txt
+        echo "直接编译进内核: $(grep "^CONFIG_.*=y" .config | wc -l)" >> config-report.txt
+        echo "编译为模块: $(grep "^CONFIG_.*=m" .config | wc -l)" >> config-report.txt
+        echo "禁用项: $(grep "^# CONFIG_.* is not set" .config | wc -l)" >> config-report.txt
+        echo "" >> config-report.txt
+        echo "关键功能状态:" >> config-report.txt
+        echo "全kmods编译: $(grep "^CONFIG_ALL_KMODS=y" .config && echo "启用" || echo "禁用")" >> config-report.txt
+        echo "APK包管理: $(grep "^CONFIG_USE_APK=y" .config && echo "启用" || echo "禁用")" >> config-report.txt
+        echo "TurboACC: $(grep "^CONFIG_PACKAGE_luci-app-turboacc=m" .config && echo "模块" || echo "禁用")" >> config-report.txt
+        echo "Fullcone NAT: $(grep "^CONFIG_PACKAGE_nft-fullcone=m" .config && echo "模块" || echo "禁用")" >> config-report.txt
+        echo "Shortcut FE: $(grep "^CONFIG_PACKAGE_kmod-shortcut-fe=m" .config && echo "模块" || echo "禁用")" >> config-report.txt
+        
+        cat config-report.txt
+
+    # ==================== 步骤6: 准备配置文件 ====================
+    - name: 准备配置文件
+      run: |
+        echo "=== 步骤6: 准备配置文件 ==="
+        mkdir -p upload/config
+        
+        # 复制主要配置文件
+        cp .config upload/config/
+        cp config-report.txt upload/config/
+        cp version-info.txt upload/config/ 2>/dev/null || echo "版本信息文件不存在"
+        
+        # 生成配置差异报告（如果有之前的配置）
+        if [ -f ".config.old" ]; then
+          echo "生成配置差异报告..."
+          diff -u .config.old .config > upload/config/config-diff.diff 2>/dev/null || echo "无差异或无法生成差异报告"
+        fi
+        
+        # 显示最终配置预览
+        echo "=== 最终配置预览 (前50行) ==="
+        head -50 .config
+        
+        echo "=== 配置文件信息 ==="
+        ls -la upload/config/
+        echo "配置文件大小: $(du -h upload/config/.config | cut -f1)"
+
+    # ==================== 步骤7: 上传配置文件 ====================
+    - name: 上传配置文件
+      uses: actions/upload-artifact@v4
+      with:
+        name: openwrt-config-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}-sfe-${{ github.event.inputs.include_sfe }}
+        path: upload/config/
+        retention-days: 30
+        if-no-files-found: error
