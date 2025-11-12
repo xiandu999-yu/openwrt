@@ -71,14 +71,18 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-openwrt-
 
-    - name: 安装系统依赖
+    - name: 安装系统依赖 (LEDE推荐)
       run: |
-        sudo apt-get update
-        sudo apt-get install -y \
-          build-essential clang flex bison g++ gawk gcc-multilib g++-multilib \
-          gettext git libncurses5-dev libssl-dev python3 python3-pip \
-          python3-setuptools python3-dev python3-serial unzip zlib1g-dev \
-          file wget rsync libelf-dev
+        echo "=== 安装LEDE推荐的完整编译依赖 ==="
+        sudo apt update -y
+        sudo apt full-upgrade -y
+        sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
+        bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gcc-multilib g++-multilib gettext \
+        genisoimage git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev \
+        libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev \
+        libreadline-dev libssl-dev libtool llvm lrzsz libnsl-dev ninja-build p7zip p7zip-full patch pkgconf \
+        python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion \
+        swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
     - name: 检查系统信息
       run: |
@@ -90,6 +94,7 @@ jobs:
         echo "SFE: ${{ github.event.inputs.include_sfe }}"
         echo "CPU: $(nproc) 核心"
         echo "内存: $(free -h | grep Mem | awk '{print $2}')"
+        echo "系统: $(lsb_release -d | cut -f2)"
         echo ""
 
     - name: 配置 feeds 源
@@ -109,17 +114,26 @@ jobs:
         echo "安装 feeds..."
         ./scripts/feeds install -a
 
+    - name: 运行 prereq 检查
+      run: |
+        echo "=== 运行 prereq 依赖检查 ==="
+        make prereq
+        echo "✅ prereq 检查通过"
+
     - name: 应用基础配置
       run: |
         echo "=== 应用基础设备配置 ==="
         if [ "${{ github.event.inputs.target_device }}" = "nanopi-r3s" ]; then
           cp configs/nanopi-r3s.config .config
+          echo "选择 NanoPi R3S 配置"
         else
           cp configs/nanopi-r6s.config .config
+          echo "选择 NanoPi R6S 配置"
         fi
         
         # 应用基础配置
         make defconfig
+        echo "✅ 基础配置完成"
 
     - name: 配置核心功能
       run: |
@@ -142,12 +156,14 @@ jobs:
           echo "CONFIG_PACKAGE_htop=y" >> .config
           echo "CONFIG_PACKAGE_nano=y" >> .config
           echo "CONFIG_PACKAGE_vim=y" >> .config
+          echo "CONFIG_PACKAGE_curl=y" >> .config
         fi
         
         # iStore配置
         if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
           echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
+          echo "CONFIG_PACKAGE_luci-app-quickstart=y" >> .config
         fi
         
         # TurboACC配置 (仅Fullcone NAT)
@@ -173,18 +189,26 @@ jobs:
         echo "CONFIG_PACKAGE_kmod-pppoe=y" >> .config
         echo "CONFIG_PACKAGE_kmod-nf-nat=y" >> .config
         echo "CONFIG_PACKAGE_kmod-ipt-core=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-ipv6=y" >> .config
         
         # 文件系统
         echo "CONFIG_PACKAGE_kmod-fs-ext4=y" >> .config
         echo "CONFIG_PACKAGE_kmod-fs-squashfs=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-fs-vfat=y" >> .config
         
         # USB支持
         echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb-storage=y" >> .config
         echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-usb3=y" >> .config
         
         # 加密
         echo "CONFIG_PACKAGE_kmod-crypto-core=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-crypto-hash=y" >> .config
+        
+        # 其他核心模块
+        echo "CONFIG_PACKAGE_kmod-nls-base=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-nls-utf8=y" >> .config
         
         # 应用配置
         make oldconfig
@@ -215,6 +239,10 @@ jobs:
         
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
           check_config "CONFIG_PACKAGE_kmod-shortcut-fe" "Shortcut FE"
+        fi
+        
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          check_config "CONFIG_PACKAGE_luci-app-istorex" "iStore"
         fi
         
         echo ""
@@ -273,21 +301,21 @@ jobs:
         # 设置线程数
         if [ "${{ github.event.inputs.compile_threads }}" = "multi" ]; then
           THREADS=$(nproc)
+          echo "使用多线程模式: $THREADS 个CPU核心"
         else
           THREADS=1
+          echo "使用单线程模式: 1 个CPU核心 (系统有 $(nproc) 个核心)"
         fi
-        
-        echo "使用线程数: $THREADS"
         
         # 设置环境变量
         export FORCE_UNSAFE_CONFIGURE=1
         
-        # 编译
         echo "开始完整编译..."
-        make -j$THREADS V=s 2>&1 | tee build.log || {
-          echo "编译过程有错误，检查产物..."
-          # 即使编译出错，也尝试收集已生成的产物
-        }
+        if [ "$THREADS" -eq 1 ]; then
+          make -j1 V=s 2>&1 | tee build.log
+        else
+          make -j$THREADS V=s 2>&1 | tee build.log
+        fi
         
         echo "编译完成"
 
