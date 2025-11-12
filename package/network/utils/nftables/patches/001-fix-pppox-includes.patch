@@ -1,0 +1,15 @@
+--- a/src/rule.c
++++ b/src/rule.c
+@@ -36,9 +36,11 @@
+ #include <linux/netfilter.h>
+ #include <linux/netfilter_arp.h>
+ #include <linux/netfilter_bridge.h>
+-#include <linux/if_pppox.h>
+ #include <linux/if_vlan.h>
+ 
++/* 条件包含 if_pppox.h */
++#include <linux/if_pppox.h>
++
+ #include <expression.h>
+ #include <statement.h>
+ #include <rule.h>
