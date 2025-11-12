@@ -228,7 +228,7 @@ jobs:
         
         # 强制启用全kmods编译
         echo "CONFIG_ALL_KMODS=y" >> .config
-        echo "CONFIG_ALL_NONSHARED=n" >> .config
+        echo "# CONFIG_ALL_NONSHARED is not set" >> .config
         
         # 禁用有问题的包
         echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
@@ -295,29 +295,41 @@ jobs:
         make defconfig
         echo "✅ 基础配置完成"
 
-    # ==================== 步骤2: 启用所有内核功能 ====================
-    - name: 启用所有内核功能
+    # ==================== 步骤2: 应用内核配置 ====================
+    - name: 应用内核配置
       run: |
-        echo "=== 步骤2: 启用所有内核模块和功能 ==="
+        echo "=== 步骤2: 应用内核配置 ==="
+        chmod +x scripts/apply-kernel-config.sh
+        ./scripts/apply-kernel-config.sh
+        
+        # 验证内核配置
+        echo "=== 内核配置验证 ==="
+        make kernel_oldconfig
+        echo "✅ 内核配置完成"
+
+    # ==================== 步骤3: 启用所有内核包 ====================
+    - name: 启用所有内核包
+      run: |
+        echo "=== 步骤3: 启用所有内核包 ==="
         chmod +x scripts/enable-all-kmods.sh
         ./scripts/enable-all-kmods.sh
         
         # 验证配置
         echo "=== 配置验证 ==="
         make oldconfig
-        echo "✅ 内核功能配置完成"
+        echo "✅ 内核包配置完成"
 
-    # ==================== 步骤3: 验证内核配置 ====================
+    # ==================== 步骤4: 验证内核配置 ====================
     - name: 验证内核配置
       run: |
-        echo "=== 步骤3: 验证内核配置 ==="
+        echo "=== 步骤4: 验证内核配置 ==="
         chmod +x scripts/verify-kernel-config.sh
         ./scripts/verify-kernel-config.sh
 
-    # ==================== 步骤4: 应用自定义修改 ====================
+    # ==================== 步骤5: 应用自定义修改 ====================
     - name: 应用自定义修改
       run: |
-        echo "=== 步骤4: 应用自定义修改 ==="
+        echo "=== 步骤5: 应用自定义修改 ==="
         chmod +x scripts/*.sh
         echo "应用基础补丁..."
         ./scripts/apply-custom-patches.sh
@@ -344,10 +356,10 @@ jobs:
           echo "跳过iStore相关软件包..."
         fi
 
-    # ==================== 步骤5: 修复已知编译问题 ====================
+    # ==================== 步骤6: 修复已知编译问题 ====================
     - name: 修复已知编译问题
       run: |
-        echo "=== 步骤5: 修复已知编译问题 ==="
+        echo "=== 步骤6: 修复已知编译问题 ==="
     
         echo "清理rtpengine包..."
         rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
@@ -369,10 +381,10 @@ jobs:
           sed -i 's/\/usr\/share\/X11\/xkb/\/usr\/share\/X11\/xkb-src/g' feeds/video/libs/xkeyboard-config/Makefile 2>/dev/null || echo "xkeyboard-config修复失败"
         fi
 
-    # ==================== 步骤6: 修复PPP编译问题 ====================
+    # ==================== 步骤7: 修复PPP编译问题 ====================
     - name: 修复PPP编译问题
       run: |
-        echo "=== 步骤6: 修复PPP相关编译问题 ==="
+        echo "=== 步骤7: 修复PPP相关编译问题 ==="
     
         rm -rf build_dir/target-*/ppp-*
         rm -rf staging_dir/target-*/ppp
@@ -387,17 +399,17 @@ jobs:
         find staging_dir -name ".ppp*" -type f -delete 2>/dev/null || true
         echo "PPP修复完成"
 
-    # ==================== 步骤7: 修复内核头文件缺失 ====================
+    # ==================== 步骤8: 修复内核头文件缺失 ====================
     - name: 修复内核头文件缺失
       run: |
-        echo "=== 步骤7: 执行全面的内核头文件修复 ==="
+        echo "=== 步骤8: 执行全面的内核头文件修复 ==="
         chmod +x scripts/fix-kernel-headers.sh
         ./scripts/fix-kernel-headers.sh
 
-    # ==================== 步骤8: 应用 Shortcut FE 内核补丁 ====================
+    # ==================== 步骤9: 应用 Shortcut FE 内核补丁 ====================
     - name: 应用 Shortcut FE 内核补丁
       run: |
-        echo "=== 步骤8: 应用 Shortcut FE 内核补丁 ==="
+        echo "=== 步骤9: 应用 Shortcut FE 内核补丁 ==="
         chmod +x scripts/apply-sfe-kernel-patch.sh
         ./scripts/apply-sfe-kernel-patch.sh
         
@@ -410,17 +422,17 @@ jobs:
           exit 1
         fi
 
-    # ==================== 步骤9: 专门检查 Shortcut FE ====================
+    # ==================== 步骤10: 专门检查 Shortcut FE ====================
     - name: 专门检查 Shortcut FE
       run: |
-        echo "=== 步骤9: 专门检查 Shortcut FE ==="
+        echo "=== 步骤10: 专门检查 Shortcut FE ==="
         chmod +x scripts/check-shortcut-fe.sh
         ./scripts/check-shortcut-fe.sh
 
-    # ==================== 步骤10: 检查编译环境 ====================
+    # ==================== 步骤11: 检查编译环境 ====================
     - name: 检查编译环境
       run: |
-        echo "=== 步骤10: 检查关键包状态 ==="
+        echo "=== 步骤11: 检查关键包状态 ==="
         if [ -d "package/libs/libnftnl" ]; then
             echo "✅ libnftnl 存在"
             ls package/libs/libnftnl/patches/ 2>/dev/null || echo "无补丁"
@@ -441,10 +453,10 @@ jobs:
           echo "跳过 iStore 包检查"
         fi
 
-    # ==================== 步骤11: 生成版本信息 ====================
+    # ==================== 步骤12: 生成版本信息 ====================
     - name: 生成版本信息
       run: |
-        echo "=== 步骤11: 生成版本信息 ==="
+        echo "=== 步骤12: 生成版本信息 ==="
         echo "=== 固件版本信息 ===" > version-info.txt
         echo "基础版本: OpenWrt SNAPSHOT (开发版)" >> version-info.txt
         echo "内核版本: 6.12" >> version-info.txt
@@ -474,17 +486,17 @@ jobs:
         fi
         cat version-info.txt
 
-    # ==================== 步骤12: 清理有问题的包 ====================
+    # ==================== 步骤13: 清理有问题的包 ====================
     - name: 清理有问题的包
       run: |
-        echo "=== 步骤12: 清理已知有问题的包 ==="
+        echo "=== 步骤13: 清理已知有问题的包 ==="
         rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
         echo "保留Shortcut FE包，将通过修复解决编译问题"
 
-    # ==================== 步骤13: 修复已知编译错误 ====================
+    # ==================== 步骤14: 修复已知编译错误 ====================
     - name: 修复已知编译错误
       run: |
-        echo "=== 步骤13: 修复已知的编译问题 ==="
+        echo "=== 步骤14: 修复已知的编译问题 ==="
     
         echo "修复 gnutls 编译问题..."
         if [ -d "feeds/packages/libs/gnutls" ]; then
@@ -508,10 +520,10 @@ jobs:
           ./scripts/fix-sfe-kernel-6.12.sh
         fi
 
-    # ==================== 步骤14: 构建固件 ====================
+    # ==================== 步骤15: 构建固件 ====================
     - name: 构建固件（健壮编译策略）
       run: |
-        echo "=== 步骤14: 开始编译固件 ==="
+        echo "=== 步骤15: 开始编译固件 ==="
         echo "编译线程模式: ${{ github.event.inputs.compile_threads }}"
         echo "编译模式: ${{ github.event.inputs.build_mode }}"
         echo "包含iStore: ${{ github.event.inputs.include_istore }}"
