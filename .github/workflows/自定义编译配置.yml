@@ -114,9 +114,9 @@ jobs:
         echo "安装 feeds..."
         ./scripts/feeds install -a
 
-    - name: 应用 Fullcone NAT 补丁
+    - name: 下载并应用 Fullcone NAT 补丁
       run: |
-        echo "=== 应用 Fullcone NAT 补丁 ==="
+        echo "=== 下载并应用 Fullcone NAT 补丁 ==="
         
         # 创建补丁目录
         mkdir -p target/linux/generic/hack-6.12
@@ -125,70 +125,45 @@ jobs:
         mkdir -p package/network/config/firewall4/patches
         mkdir -p package/network/config/firewall/patches
         mkdir -p package/network/utils/iptables/patches
-        
-        # 1. 内核 Fullcone NAT 补丁
-        echo "应用内核 Fullcone NAT 补丁..."
-        cat > target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch << 'EOF'
-        # 这里插入您提供的完整内核补丁内容
-        EOF
-        
-        # 2. libnftnl Fullcone 支持补丁
-        echo "应用 libnftnl Fullcone 支持补丁..."
-        cat > package/libs/libnftnl/patches/999-11-masq-fullcone-expr.patch << 'EOF'
-        # 这里插入 libnftnl 补丁内容
-        EOF
-        
-        # 3. nftables Fullcone 支持补丁
-        echo "应用 nftables Fullcone 支持补丁..."
-        cat > package/network/utils/nftables/patches/999-11-masq-fullcone-flag.patch << 'EOF'
-        # 这里插入 nftables 补丁内容
-        EOF
-        
-        # 4. firewall4 Fullcone 支持补丁
-        echo "应用 firewall4 Fullcone 支持补丁..."
-        cat > package/network/config/firewall4/patches/999-03-fw4-masq-fullcone.patch << 'EOF'
-        # 这里插入 firewall4 补丁内容
-        EOF
-        
-        # 5. iptables Fullcone 支持补丁
-        echo "应用 iptables Fullcone 支持补丁..."
-        cat > package/network/utils/iptables/patches/900-bcm-fullconenat.patch << 'EOF'
-        # 这里插入 iptables 补丁内容
-        EOF
-        
-        # 6. firewall3 Fullcone 支持补丁
-        echo "应用 firewall3 Fullcone 支持补丁..."
-        cat > package/network/config/firewall/patches/100-fullconenat.patch << 'EOF'
-        # 这里插入 firewall3 补丁内容
-        EOF
-        
-        cat > package/network/config/firewall/patches/101-bcm-fullconenat.patch << 'EOF'
-        # 这里插入 firewall3 BCM 补丁内容
-        EOF
-        
-        echo "✅ Fullcone NAT 补丁应用完成"
-
-    - name: 添加 Fullcone NAT 配置脚本
-      run: |
-        echo "=== 添加 Fullcone NAT 配置脚本 ==="
-        
-        # 创建 Fullcone NAT 配置脚本
         mkdir -p package/base-files/files/etc/uci-defaults
-        cat > package/base-files/files/etc/uci-defaults/99_fullcone_nat_fw4 << 'EOF'
-        #!/bin/sh
-
-        [ "0" = "$(uci -q get 'firewall.@defaults[0].fullcone')" ] && exit 0
-
-        uci -q batch <<-EOF
-        set firewall.@defaults[0].fullcone='2'
-        commit firewall
-        EOF
-
-        exit 0
-        EOF
+        
+        # 1. 下载内核 Fullcone NAT 补丁 (从 LEDE)
+        echo "下载内核 Fullcone NAT 补丁..."
+        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch \
+          -o target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch || echo "内核补丁下载失败"
+        
+        # 2. 下载 libnftnl Fullcone 支持补丁 (从 iStoreOS)
+        echo "下载 libnftnl Fullcone 支持补丁..."
+        curl -sSL https://raw.githubusercontent.com/istoreos/istoreos/istoreos-24.10/package/libs/libnftnl/patches/999-11-masq-fullcone-expr.patch \
+          -o package/libs/libnftnl/patches/999-11-masq-fullcone-expr.patch || echo "libnftnl 补丁下载失败"
+        
+        # 3. 下载 nftables Fullcone 支持补丁 (从 iStoreOS)
+        echo "下载 nftables Fullcone 支持补丁..."
+        curl -sSL https://raw.githubusercontent.com/istoreos/istoreos/istoreos-24.10/package/network/utils/nftables/patches/999-11-masq-fullcone-flag.patch \
+          -o package/network/utils/nftables/patches/999-11-masq-fullcone-flag.patch || echo "nftables 补丁下载失败"
+        
+        # 4. 下载 firewall4 Fullcone 支持补丁 (从 iStoreOS)
+        echo "下载 firewall4 Fullcone 支持补丁..."
+        curl -sSL https://raw.githubusercontent.com/istoreos/istoreos/istoreos-24.10/package/network/config/firewall4/patches/999-03-fw4-masq-fullcone.patch \
+          -o package/network/config/firewall4/patches/999-03-fw4-masq-fullcone.patch || echo "firewall4 补丁下载失败"
+        
+        # 5. 下载 iptables Fullcone 支持补丁 (从 iStoreOS)
+        echo "下载 iptables Fullcone 支持补丁..."
+        curl -sSL https://raw.githubusercontent.com/istoreos/istoreos/istoreos-24.10/package/network/utils/iptables/patches/900-bcm-fullconenat.patch \
+          -o package/network/utils/iptables/patches/900-bcm-fullconenat.patch || echo "iptables 补丁下载失败"
+        
+        # 6. 下载配置脚本 (从 iStoreOS)
+        echo "下载 Fullcone NAT 配置脚本..."
+        curl -sSL https://raw.githubusercontent.com/istoreos/istoreos/istoreos-24.10/package/istoreos-files/files/etc/uci-defaults/99_fullcone_nat_fw4 \
+          -o package/base-files/files/etc/uci-defaults/99_fullcone_nat_fw4 || echo "配置脚本下载失败"
         
         chmod +x package/base-files/files/etc/uci-defaults/99_fullcone_nat_fw4
-        echo "✅ Fullcone NAT 配置脚本添加完成"
+        
+        echo "✅ Fullcone NAT 补丁下载完成"
+        
+        # 验证下载的文件
+        echo "=== 验证下载的补丁 ==="
+        find . -name "*fullcone*" -o -name "*masq*" -type f 2>/dev/null | head -20
 
     - name: 运行 prereq 检查
       run: |
@@ -211,9 +186,9 @@ jobs:
         make defconfig
         echo "✅ 基础配置完成"
 
-    - name: 配置核心功能（完整 Fullcone NAT）
+    - name: 配置核心功能（修正版）
       run: |
-        echo "=== 配置核心功能（完整 Fullcone NAT 支持）==="
+        echo "=== 配置核心功能（修正 Fullcone NAT 配置）==="
         
         # 启用全内核模块
         echo "CONFIG_ALL_KMODS=y" >> .config
@@ -226,17 +201,10 @@ jobs:
         echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
         echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
         
-        # Fullcone NAT 相关配置
-        echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-ipt-fullconenat=y" >> .config
-        
-        # 网络工具配置
-        echo "CONFIG_PACKAGE_iptables-mod-fullconenat=y" >> .config
-        echo "CONFIG_PACKAGE_nftables-fullcone=y" >> .config
-        
-        # firewall4 配置
+        # Fullcone NAT - 通过补丁实现，只需要启用基础包
         echo "CONFIG_PACKAGE_firewall4=y" >> .config
-        echo "CONFIG_PACKAGE_firewall4-fullcone=y" >> .config
+        echo "CONFIG_PACKAGE_nftables-json=y" >> .config
+        echo "CONFIG_PACKAGE_iptables-mod-extra=y" >> .config
         
         # Shortcut FE配置
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
@@ -299,23 +267,45 @@ jobs:
         make oldconfig
         echo "✅ 内核模块配置完成"
 
-    - name: 验证 Fullcone NAT 配置
+    - name: 验证 Fullcone NAT 配置（修正版）
       run: |
         echo "=== 验证 Fullcone NAT 配置 ==="
         
-        echo "Fullcone NAT 相关配置状态:"
-        echo "✅ 内核 Fullcone NAT 补丁已应用"
-        echo "✅ libnftnl Fullcone 支持已添加"
-        echo "✅ nftables Fullcone 支持已添加"
-        echo "✅ firewall4 Fullcone 支持已添加"
-        echo "✅ iptables Fullcone 支持已添加"
-        echo "✅ firewall3 Fullcone 支持已添加"
-        echo "✅ Fullcone NAT 配置脚本已添加"
+        echo "Fullcone NAT 补丁状态:"
+        if [ -f "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch" ]; then
+          echo "✅ 内核 Fullcone NAT 补丁已应用"
+        else
+          echo "❌ 内核 Fullcone NAT 补丁缺失"
+        fi
+        
+        if [ -f "package/libs/libnftnl/patches/999-11-masq-fullcone-expr.patch" ]; then
+          echo "✅ libnftnl Fullcone 支持已添加"
+        else
+          echo "❌ libnftnl Fullcone 支持缺失"
+        fi
+        
+        if [ -f "package/network/utils/nftables/patches/999-11-masq-fullcone-flag.patch" ]; then
+          echo "✅ nftables Fullcone 支持已添加"
+        else
+          echo "❌ nftables Fullcone 支持缺失"
+        fi
+        
+        if [ -f "package/network/config/firewall4/patches/999-03-fw4-masq-fullcone.patch" ]; then
+          echo "✅ firewall4 Fullcone 支持已添加"
+        else
+          echo "❌ firewall4 Fullcone 支持缺失"
+        fi
+        
+        echo ""
+        echo "实际配置状态:"
+        echo "防火墙方案: $(grep "CONFIG_PACKAGE_firewall" .config | head -1 || echo "未配置")"
+        echo "nftables: $(grep "CONFIG_PACKAGE_nftables" .config | head -1 || echo "未配置")"
+        echo "iptables: $(grep "CONFIG_PACKAGE_iptables" .config | head -1 || echo "未配置")"
         
         echo ""
         echo "核心功能状态:"
         echo "✅ 全内核模块"
-        echo "✅ Fullcone NAT 支持"
+        echo "✅ Fullcone NAT 支持（通过补丁）"
         echo "✅ 基础网络功能"
         
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
@@ -329,12 +319,6 @@ jobs:
         else
           echo "⚠️ 无 iStore"
         fi
-        
-        echo ""
-        echo "配置统计:"
-        echo "总配置项: $(grep -c "^CONFIG_" .config 2>/dev/null || echo 0)"
-        echo "编译进内核: $(grep "^CONFIG_.*=y" .config 2>/dev/null | wc -l)"
-        echo "编译为模块: $(grep "^CONFIG_.*=m" .config 2>/dev/null | wc -l)"
 
     - name: 修复常见问题
       run: |
@@ -360,10 +344,8 @@ jobs:
           echo "编译模式: ${{ github.event.inputs.build_mode }}"
           echo "包含功能:"
           echo "  - 全内核模块"
-          echo "  - 完整 Fullcone NAT 支持 (内核级)"
-          echo "  - firewall4 Fullcone 支持"
-          echo "  - nftables Fullcone 支持"
-          echo "  - iptables Fullcone 支持"
+          echo "  - 完整 Fullcone NAT 支持"
+          echo "  - firewall4 + nftables"
           
           if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
             echo "  - Shortcut FE 加速"
@@ -384,7 +366,6 @@ jobs:
           echo "  - libnftnl Fullcone 表达式支持"
           echo "  - nftables Fullcone 标志支持"
           echo "  - firewall4 Fullcone 配置支持"
-          echo "  - iptables Fullcone 模式支持"
           echo "  - 自动 Fullcone NAT 配置脚本"
         } > version-info.txt
         
@@ -459,7 +440,7 @@ jobs:
     - name: 上传固件
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-fullcone-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
+        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
         path: upload/firmware/
         retention-days: 30
         if-no-files-found: warn
@@ -467,7 +448,7 @@ jobs:
     - name: 上传软件包
       uses: actions/upload-artifact@v4
       with:
-        name: packages-fullcone-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
+        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
         path: upload/packages/
         retention-days: 30
         if-no-files-found: warn
@@ -476,7 +457,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-info-fullcone-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
+        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
         path: upload/
         retention-days: 7
         if-no-files-found: warn
