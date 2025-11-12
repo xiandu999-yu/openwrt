@@ -310,6 +310,12 @@ jobs:
     
         echo "PPP修复完成"
 
+    - name: 修复内核头文件缺失
+      run: |
+        chmod +x scripts/fix-kernel-headers.sh
+        ./scripts/fix-kernel-headers.sh
+
+
     - name: 应用 Shortcut FE 内核补丁
       run: |
         chmod +x scripts/apply-sfe-kernel-patch.sh
@@ -586,17 +592,6 @@ jobs:
           chmod +x scripts/fix-sfe-kernel-6.12.sh
           ./scripts/fix-sfe-kernel-6.12.sh
         fi
-
-    - name: 修复PPP编译问题
-      run: |
-        echo "修复PPP相关编译问题..."
-        
-        # 清理PPP相关的构建状态
-        rm -rf build_dir/target-*/ppp-*
-        rm -rf staging_dir/target-*/ppp
-        rm -rf tmp/build/ppp
-        
-        echo "PPP修复完成"
 
     - name: 构建固件（健壮编译策略）
       run: |
