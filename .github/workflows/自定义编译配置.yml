@@ -149,10 +149,10 @@ jobs:
         echo "配置备用 feeds 源..."
         # 创建使用镜像源的 feeds.conf
         cat > feeds.conf << 'EOF'
-        src-git packages https://github.com/openwrt/packages.git;openwrt-24.04
-        src-git luci https://github.com/openwrt/luci.git;openwrt-24.04
-        src-git routing https://github.com/openwrt/routing.git;openwrt-24.04
-        src-git telephony https://github.com/openwrt/telephony.git;openwrt-24.04
+        src-git packages https://github.com/openwrt/packages.git
+        src-git luci https://github.com/openwrt/luci.git
+        src-git routing https://github.com/openwrt/routing.git
+        src-git telephony https://github.com/openwrt/telephony.git
         src-git video https://github.com/openwrt/video.git
         # src-git targets https://github.com/openwrt/targets.git
         # src-git oldpackages http://git.openwrt.org/packages.git
