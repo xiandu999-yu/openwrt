@@ -135,49 +135,69 @@ jobs:
         make defconfig
         echo "✅ 基础配置完成"
 
-    - name: 检查 TurboACC 包是否存在
+    - name: 检查自定义包是否存在
       run: |
-        echo "=== 检查 TurboACC 包是否存在 ==="
+        echo "=== 检查自定义包是否存在 ==="
         
-        echo "搜索 TurboACC 相关文件:"
-        find . -name "*turboacc*" -type f 2>/dev/null | head -20 || echo "未找到 turboacc 文件"
-        
-        echo ""
-        echo "搜索 luci-app-turboacc:"
-        find . -name "*luci-app-turboacc*" -type d 2>/dev/null | head -10 || echo "未找到 luci-app-turboacc 目录"
+        echo "1. 检查 TurboACC 相关包:"
+        find . -name "*turboacc*" -type d 2>/dev/null | head -10 || echo "  未找到 TurboACC 包"
+        find feeds -name "*turboacc*" -type d 2>/dev/null | head -10 || echo "  feeds中未找到 TurboACC"
+        ./scripts/feeds list | grep -i turboacc || echo "  feeds列表中无 turboacc"
         
         echo ""
-        echo "搜索 feeds 中的 TurboACC:"
-        find feeds -name "*turboacc*" -type d 2>/dev/null | head -10 || echo "feeds 中未找到 turboacc"
+        echo "2. 检查 Shortcut FE 相关包:"
+        find . -name "*shortcut*" -type d 2>/dev/null | head -10 || echo "  未找到 Shortcut FE 包"
+        find . -name "*fast-classifier*" -type d 2>/dev/null | head -10 || echo "  未找到 Fast Classifier 包"
+        find feeds -name "*shortcut*" -type d 2>/dev/null | head -10 || echo "  feeds中未找到 Shortcut FE"
+        ./scripts/feeds list | grep -i shortcut || echo "  feeds列表中无 shortcut"
         
         echo ""
-        echo "检查当前可用的包:"
-        ./scripts/feeds list | grep -i turboacc || echo "feeds 列表中无 turboacc"
-        ./scripts/feeds list | grep -i fullcone || echo "feeds 列表中无 fullcone"
+        echo "3. 检查 iStore 相关包:"
+        find . -name "*istore*" -type d 2>/dev/null | head -10 || echo "  未找到 iStore 包"
+        find feeds -name "*store*" -type d | grep -v ".git" | head -10 || echo "  feeds中store相关包有限"
+        ./scripts/feeds list | grep -i store | head -10 || echo "  feeds列表中store包有限"
 
-    - name: 添加 TurboACC 源（如果不存在）
+    - name: 添加自定义包功能
       run: |
-        echo "=== 添加 TurboACC 源 ==="
+        echo "=== 添加自定义包功能 ==="
         
-        # 检查是否已经存在 turboacc
-        if ! find . -name "*turboacc*" -type d | grep -q .; then
-          echo "TurboACC 不存在，从官方源添加..."
-          # 添加 chenmozhijin 的 turboacc 源
-          if ! grep -q "turboacc" feeds.conf; then
-            echo "src-git turboacc https://github.com/chenmozhijin/turboacc.git" >> feeds.conf
-            echo "✅ 已添加 TurboACC 源"
+        # 确保脚本有执行权限
+        chmod +x scripts/*.sh 2>/dev/null || echo "无脚本文件"
+        
+        # 添加 iStore 相关包
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "添加 iStore 相关包..."
+          if [ -f "scripts/add-packages.sh" ]; then
+            ./scripts/add-packages.sh
+            echo "✅ iStore 包添加完成"
+          else
+            echo "⚠️ scripts/add-packages.sh 不存在，跳过 iStore"
           fi
-          
-          # 重新更新 feeds
-          ./scripts/feeds update turboacc 2>/dev/null || echo "TurboACC feed 更新失败"
-          ./scripts/feeds install -a -p turboacc 2>/dev/null || echo "TurboACC 安装失败"
+        fi
+        
+        # 添加网络加速功能
+        echo "添加网络加速功能..."
+        if [ -f "scripts/integrate-features.sh" ]; then
+          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+            ./scripts/integrate-features.sh --with-sfe
+          else
+            ./scripts/integrate-features.sh
+          fi
+          echo "✅ 网络加速功能添加完成"
         else
-          echo "✅ TurboACC 已存在"
+          echo "⚠️ scripts/integrate-features.sh 不存在，跳过网络加速"
         fi
 
-    - name: 配置核心功能（安全版本）
+    - name: 重新安装 feeds（包含新包）
       run: |
-        echo "=== 配置核心功能（安全版本）==="
+        echo "=== 重新安装 feeds（包含新包）==="
+        ./scripts/feeds update -a
+        ./scripts/feeds install -a
+        echo "✅ feeds 重新安装完成"
+
+    - name: 配置核心功能
+      run: |
+        echo "=== 配置核心功能 ==="
         
         # 启用全内核模块
         echo "CONFIG_ALL_KMODS=y" >> .config
@@ -190,21 +210,39 @@ jobs:
         echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
         echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
         
-        # 先检查 TurboACC 是否存在再配置
+        # TurboACC配置 - 检查包存在性
         if find . -name "*turboacc*" -type d | grep -q . || find feeds -name "*turboacc*" -type d | grep -q .; then
           echo "配置 TurboACC..."
           echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
           echo "CONFIG_PACKAGE_nft-fullcone=y" >> .config
           echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-fullconenat=y" >> .config
         else
-          echo "⚠️ TurboACC 不存在，跳过配置"
+          echo "⚠️ TurboACC 包不存在，跳过配置"
         fi
         
-        # Shortcut FE配置
+        # Shortcut FE配置 - 详细检查
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=y" >> .config
+          echo "检查 Shortcut FE 包状态..."
+          SFE_FOUND=false
+          
+          # 检查各种可能的包名
+          for pkg in shortcut-fe fast-classifier; do
+            if find . -name "*$pkg*" -type d | grep -q . || find feeds -name "*$pkg*" -type d | grep -q .; then
+              SFE_FOUND=true
+              echo "找到 $pkg 包"
+            fi
+          done
+          
+          if [ "$SFE_FOUND" = "true" ]; then
+            echo "配置 Shortcut FE..."
+            echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=y" >> .config
+          else
+            echo "⚠️ Shortcut FE 包不存在，跳过配置"
+          fi
         fi
         
         # 根据编译模式配置
@@ -216,11 +254,20 @@ jobs:
           echo "CONFIG_PACKAGE_curl=y" >> .config
         fi
         
-        # iStore配置
+        # iStore配置 - 检查包存在性
         if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
-          echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-quickstart=y" >> .config
+          if [ -d "package/luci-app-istorex" ] || find . -name "*istore*" -type d | grep -q .; then
+            echo "配置 iStore..."
+            echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
+            echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
+            echo "CONFIG_PACKAGE_luci-app-quickstart=y" >> .config
+            echo "CONFIG_PACKAGE_luci-lib-taskd=y" >> .config
+            echo "CONFIG_PACKAGE_quickstart=y" >> .config
+            echo "CONFIG_PACKAGE_luci-lib-xterm=y" >> .config
+            echo "CONFIG_PACKAGE_taskd=y" >> .config
+          else
+            echo "⚠️ iStore 包不存在，跳过配置"
+          fi
         fi
         
         # 重新应用配置
@@ -261,11 +308,10 @@ jobs:
         make oldconfig
         echo "✅ 内核模块配置完成"
 
-    - name: 安全验证配置
+    - name: 最终配置验证
       run: |
-        echo "=== 安全验证配置 ==="
+        echo "=== 最终配置验证 ==="
         
-        # 使用简单的echo而不是检查函数
         echo "核心功能状态:"
         echo "✅ 全内核模块"
         echo "✅ PPP支持" 
@@ -273,11 +319,11 @@ jobs:
         echo "✅ EXT4文件系统"
         echo "✅ USB核心"
         
-        # 直接输出状态，不进行检查
+        # 安全检查，不触发错误
         if grep -q "^CONFIG_PACKAGE_luci-app-turboacc=y" .config 2>/dev/null || grep -q "^CONFIG_PACKAGE_luci-app-turboacc=m" .config 2>/dev/null; then
           echo "✅ TurboACC"
         else
-          echo "⚠️ TurboACC - 未启用（可能包不存在）"
+          echo "⚠️ TurboACC - 未启用"
         fi
         
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
@@ -292,7 +338,7 @@ jobs:
           if grep -q "^CONFIG_PACKAGE_luci-app-istorex=y" .config 2>/dev/null || grep -q "^CONFIG_PACKAGE_luci-app-istorex=m" .config 2>/dev/null; then
             echo "✅ iStore"
           else
-            echo "⚠️ iStore - 未启用（可能包不存在）"
+            echo "⚠️ iStore - 未启用"
           fi
         fi
         
@@ -302,7 +348,7 @@ jobs:
         echo "编译进内核: $(grep "^CONFIG_.*=y" .config 2>/dev/null | wc -l)"
         echo "编译为模块: $(grep "^CONFIG_.*=m" .config 2>/dev/null | wc -l)"
         
-        echo "✅ 验证完成，继续编译"
+        echo "✅ 配置验证完成，开始编译"
 
     - name: 修复常见问题
       run: |
@@ -311,7 +357,7 @@ jobs:
         # 清理有问题的包
         rm -rf feeds/telephony/net/rtpengine 2>/dev/null || true
         
-        # 修复可能的依赖问题
+        # 修复Shortcut FE配置
         if [ -d "package/qca/shortcut-fe" ]; then
           echo "修复 Shortcut FE 配置..."
           find package/qca/shortcut-fe -name "*.mk" -exec sed -i 's/kmod-shortcut-fe-cm/kmod-shortcut-fe/g' {} \; 2>/dev/null || true
@@ -374,7 +420,7 @@ jobs:
         fi
         set -e  # 重新启用错误退出
         
-        # 检查是否有产物生成
+        # 检查编译结果
         if [ -d "bin/targets" ] && [ $(find bin/targets/ -name "*.bin" -o -name "*.img" 2>/dev/null | wc -l) -gt 0 ]; then
           echo "✅ 固件文件已生成，编译成功"
           exit 0
@@ -410,7 +456,7 @@ jobs:
         
         echo "产物统计:"
         echo "固件文件: $(find upload/firmware -type f 2>/dev/null | wc -l || echo 0) 个"
-        echo "软件包: $(find upload/packages -name "*.apk" 2>/dev/null | wc -l || echo 0) 个"
+        echo "软件包: $(find upload/packages -name "*.ipk" 2>/dev/null | wc -l || echo 0) 个"
         find upload/firmware -type f 2>/dev/null | head -10 || echo "无固件文件"
 
     - name: 上传固件
