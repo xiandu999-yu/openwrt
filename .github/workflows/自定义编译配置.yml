@@ -20,14 +20,6 @@ on:
         type: boolean
         required: false
         default: true
-      turboacc_feature:  # TurboACC功能
-        description: '选择TurboACC功能配置'
-        type: choice
-        required: false
-        default: 'fullcone-only'
-        options:
-          - fullcone-only
-          - with-sfe
       compile_threads:  # 编译线程数
         description: '选择编译线程数 (单线程更稳定，多线程更快)'
         required: false
@@ -132,6 +124,8 @@ jobs:
         echo "编译线程模式: ${{ github.event.inputs.compile_threads }}"
         echo "编译模式: ${{ github.event.inputs.build_mode }}"
         echo "包含iStore: ${{ github.event.inputs.include_istore }}"
+        echo "包含SFE: ${{ github.event.inputs.include_sfe }}"
+        echo "TurboACC: 仅Fullcone NAT (无SFE)"
         echo ""
 
     - name: 安装Python依赖
@@ -147,18 +141,13 @@ jobs:
     - name: 配置备用 feeds 源
       run: |
         echo "配置备用 feeds 源..."
-        # 创建使用镜像源的 feeds.conf
         cat > feeds.conf << 'EOF'
         src-git packages https://github.com/openwrt/packages.git
         src-git luci https://github.com/openwrt/luci.git
         src-git routing https://github.com/openwrt/routing.git
         src-git telephony https://github.com/openwrt/telephony.git
         src-git video https://github.com/openwrt/video.git
-        # src-git targets https://github.com/openwrt/targets.git
-        # src-git oldpackages http://git.openwrt.org/packages.git
-        # src-link custom /usr/src/openwrt/custom-feed
         EOF
-        
         echo "备用 feeds.conf 内容:"
         cat feeds.conf
 
@@ -167,7 +156,6 @@ jobs:
         echo "开始更新软件源（带重试机制）..."
         mkdir -p logs
         
-        # 重试函数
         retry_update() {
           local max_attempts=3
           local attempt=1
@@ -190,12 +178,10 @@ jobs:
           return 1
         }
         
-        # 首先尝试使用备用源更新
         if retry_update; then
           echo "✅ 使用备用源更新成功"
         else
           echo "尝试直接使用 GitHub 源..."
-          # 直接使用 GitHub 源更新各个 feed
           for feed in packages luci routing telephony; do
             echo "更新 $feed..."
             if [ -d "feeds/$feed" ]; then
@@ -212,7 +198,6 @@ jobs:
         echo "安装 feeds 包..."
         mkdir -p logs
         
-        # 检查 feeds 目录是否存在
         echo "检查 feeds 目录状态:"
         for feed in packages luci routing telephony video; do
           if [ -d "feeds/$feed" ]; then
@@ -222,7 +207,6 @@ jobs:
           fi
         done
         
-        # 安装 feeds
         echo "开始安装 feeds..."
         if ./scripts/feeds install -a 2>&1 | tee logs/feeds-install.log; then
           echo "✅ feeds 安装成功"
@@ -230,139 +214,10 @@ jobs:
           echo "⚠️ feeds 安装过程中有错误，但继续执行..."
         fi
 
-    - name: 应用自定义修改
-      run: |
-        chmod +x scripts/*.sh
-        echo "应用基础补丁..."
-        ./scripts/apply-custom-patches.sh
-        
-        echo "修复 python 依赖..."
-        ./scripts/fix-dependencies.sh
-        
-        echo "集成TurboACC功能..."
-        if [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
-          echo "包含SFE加速 - 使用官方脚本自动处理依赖"
-          curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash
-          echo "添加完整的 Shortcut FE 支持..."
-          ./scripts/add-shortcut-fe.sh
-        else
-          echo "仅Fullcone NAT - 使用官方脚本自动处理依赖"  
-          curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash -s -- --no-sfe
-        fi
-        
-        # 根据iStore开关决定是否添加软件包
-        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
-          echo "添加iStore相关软件包..."
-          ./scripts/add-packages.sh
-        else
-          echo "跳过iStore相关软件包..."
-        fi
-
-    - name: 修复已知编译问题
-      run: |
-        echo "开始修复已知编译问题..."
-    
-        # 1. 清理真正有问题的包
-        echo "清理rtpengine包..."
-        rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
-    
-        # 2. 修复Shortcut FE而不是清理它
-        echo "修复Shortcut FE内核兼容性..."
-        if [ -d "package/qca/shortcut-fe" ]; then
-          # 应用Shortcut FE修复
-          chmod +x scripts/fix-sfe-kernel-6.12.sh
-          ./scripts/fix-sfe-kernel-6.12.sh
-        else
-          echo "Shortcut FE目录不存在，跳过修复"
-        fi
-    
-        # 3. 修复 video feed 中的问题
-        echo "修复 video feed 编译问题..."
-        if [ -f "feeds/video/libs/mesa/Makefile" ]; then
-          echo "修复 mesa Makefile..."
-          sed -i 's/^define Package\/mesa\/install$/define Package\/mesa\/install-bin/g' feeds/video/libs/mesa/Makefile 2>/dev/null || echo "mesa修复失败"
-        fi
-        
-        if [ -f "feeds/video/libs/xkeyboard-config/Makefile" ]; then
-          echo "修复 xkeyboard-config Makefile..."
-          sed -i 's/\/usr\/share\/X11\/xkb/\/usr\/share\/X11\/xkb-src/g' feeds/video/libs/xkeyboard-config/Makefile 2>/dev/null || echo "xkeyboard-config修复失败"
-        fi
-
-    - name: 修复PPP编译问题
-      run: |
-        echo "修复PPP相关编译问题..."
-    
-        # 清理PPP相关的构建状态
-        rm -rf build_dir/target-*/ppp-*
-        rm -rf staging_dir/target-*/ppp
-        rm -rf tmp/build/ppp
-    
-        # 修复PPP包可能的问题
-        if [ -d "package/network/services/ppp" ]; then
-          echo "检查PPP包配置..."
-          # 确保PPP包配置正确
-          find package/network/services/ppp -name "*.mk" -exec grep -l "pppoe" {} \;
-        fi
-    
-        # 清理staging目录中的PPP相关文件
-        find staging_dir -name "*ppp*" -type f -delete 2>/dev/null || true
-        find staging_dir -name ".ppp*" -type f -delete 2>/dev/null || true
-    
-        echo "PPP修复完成"
-
-    - name: 修复内核头文件缺失
-      run: |
-        chmod +x scripts/fix-kernel-headers.sh
-        ./scripts/fix-kernel-headers.sh
-
-
-    - name: 应用 Shortcut FE 内核补丁
-      run: |
-        chmod +x scripts/apply-sfe-kernel-patch.sh
-        ./scripts/apply-sfe-kernel-patch.sh
-        
-        # 验证补丁是否应用
-        if [ -f "target/linux/generic/hack-6.12/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" ]; then
-          echo "✅ Shortcut FE 内核补丁已成功应用"
-          echo "补丁内容预览:"
-          head -20 target/linux/generic/hack-6.12/953-net-patch-linux-kernel-to-support-shortcut-fe.patch
-        else
-          echo "❌ 补丁应用失败"
-          exit 1
-        fi
-
-    - name: 专门检查 Shortcut FE
-      run: |
-        chmod +x scripts/check-shortcut-fe.sh
-        ./scripts/check-shortcut-fe.sh
-
-    - name: 检查编译环境
-      run: |
-        echo "检查关键包状态..."
-        # 检查 libnftnl
-        if [ -d "package/libs/libnftnl" ]; then
-            echo "✅ libnftnl 存在"
-            ls package/libs/libnftnl/patches/ 2>/dev/null || echo "无补丁"
-        else
-            echo "❌ libnftnl 不存在"
-        fi
-        
-        # 检查 iStore 相关包
-        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
-          echo "检查 iStore 包状态:"
-          for pkg in luci-app-istorex luci-app-quickstart luci-app-store luci-lib-taskd quickstart luci-lib-xterm taskd; do
-              if [ -d "package/$pkg" ]; then
-                  echo "✅ $pkg 存在"
-              else
-                  echo "❌ $pkg 不存在"
-              fi
-          done
-        else
-          echo "跳过 iStore 包检查"
-        fi
-
+    # ==================== 步骤1: 基础配置 ====================
     - name: 配置编译参数
       run: |
+        echo "=== 步骤1: 基础配置 ==="
         if [ "${{ github.event.inputs.target_device }}" = "nanopi-r3s" ]; then
           cp configs/nanopi-r3s.config .config
           echo "选择NanoPi R3S配置"
@@ -371,44 +226,51 @@ jobs:
           echo "选择NanoPi R6S配置"
         fi
         
-        # 禁用有问题的包 - 使用正确的配置语法
-        echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
-        echo "# CONFIG_PACKAGE_rtpengine-full is not set" >> .config
-        echo "# CONFIG_PACKAGE_rtpengine-no-transcode is not set" >> .config
-        
-        # 禁用有问题的telephony feed包
-        echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
-        echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
-        
-        # 禁用有问题的 video feed 包
-        echo "# CONFIG_PACKAGE_mesa is not set" >> .config
-        echo "# CONFIG_PACKAGE_xkeyboard-config is not set" >> .config
-        
-        # 内核模块配置 - 始终启用所有kmods
+        # 强制启用全kmods编译
         echo "CONFIG_ALL_KMODS=y" >> .config
         echo "CONFIG_ALL_NONSHARED=n" >> .config
         
-        # 启用APK包管理
+        # 禁用有问题的包
+        echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
+        echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
+        echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
+        echo "# CONFIG_PACKAGE_mesa is not set" >> .config
+        echo "# CONFIG_PACKAGE_xkeyboard-config is not set" >> .config
+        
+        # 基础系统配置
         echo "CONFIG_USE_APK=y" >> .config
         
-        # Python 支持
-        echo "CONFIG_PACKAGE_python3=y" >> .config
-        echo "CONFIG_PACKAGE_python3-light=y" >> .config
-        echo "CONFIG_PACKAGE_python3-distutils=y" >> .config
+        # TurboACC配置 - 仅Fullcone NAT (锁定无SFE)
+        echo "CONFIG_PACKAGE_luci-app-turboacc=m" >> .config
+        echo "CONFIG_PACKAGE_nft-fullcone=m" >> .config
         
-        # Lua 支持
-        echo "CONFIG_PACKAGE_lua=y" >> .config
-        echo "CONFIG_PACKAGE_liblucihttp=m" >> .config
-        echo "CONFIG_PACKAGE_liblucihttp-lua=m" >> .config
+        # 根据独立选项配置LEDE的Shortcut FE内核模块
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+          echo "启用LEDE的Shortcut FE内核模块..."
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe=m" >> .config
+          echo "CONFIG_PACKAGE_kmod-fast-classifier=m" >> .config
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=m" >> .config
+        else
+          echo "禁用LEDE的Shortcut FE内核模块..."
+          echo "# CONFIG_PACKAGE_kmod-shortcut-fe is not set" >> .config
+          echo "# CONFIG_PACKAGE_kmod-fast-classifier is not set" >> .config
+          echo "# CONFIG_PACKAGE_kmod-shortcut-fe-drv is not set" >> .config
+        fi
         
-        # 基础系统 - 最小化内置
-        echo "CONFIG_PACKAGE_luci=m" >> .config
-        echo "CONFIG_PACKAGE_luci-base=m" >> .config
-        echo "CONFIG_PACKAGE_luci-compat=m" >> .config
-        echo "CONFIG_PACKAGE_luci-theme-bootstrap=m" >> .config
-        echo "CONFIG_LUCI_LANG_zh-cn=m" >> .config
+        # 根据编译模式决定是否包含完整工具集
+        if [ "${{ github.event.inputs.build_mode }}" = "full" ]; then
+          echo "编译模式: 全kmods+固件+全插件"
+          echo "CONFIG_PACKAGE_curl=m" >> .config
+          echo "CONFIG_PACKAGE_bash=m" >> .config
+          echo "CONFIG_PACKAGE_htop=m" >> .config
+          echo "CONFIG_PACKAGE_nano=m" >> .config
+          echo "CONFIG_PACKAGE_vim=m" >> .config
+          echo "CONFIG_PACKAGE_tar=m" >> .config
+        else
+          echo "编译模式: 全kmods+固件"
+        fi
         
-        # iStore 相关包 - 根据开关配置
+        # iStore相关配置
         if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
           echo "启用 iStore 相关包..."
           echo "CONFIG_PACKAGE_luci-app-istorex=m" >> .config
@@ -429,115 +291,179 @@ jobs:
           echo "# CONFIG_PACKAGE_taskd is not set" >> .config
         fi
         
-        # Argon 主题（可选）
-        echo "CONFIG_PACKAGE_luci-theme-argon=m" >> .config
-        echo "CONFIG_PACKAGE_luci-app-argon-config=m" >> .config
-        
-        # coreutils 相关工具
-        echo "CONFIG_PACKAGE_coreutils=y" >> .config
-        echo "CONFIG_PACKAGE_coreutils-sort=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-od=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-stat=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-tee=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-mktemp=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-chroot=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-sha1sum=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-sleep=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-date=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-timeout=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-dirname=m" >> .config
-        echo "CONFIG_PACKAGE_coreutils-stty=m" >> .config
-        
-        # 基础网络工具
-        echo "CONFIG_PACKAGE_iptables=m" >> .config
-        echo "CONFIG_PACKAGE_iptables-mod-conntrack-extra=m" >> .config
-        echo "CONFIG_PACKAGE_iptables-mod-ipopt=m" >> .config
-        echo "CONFIG_PACKAGE_iptables-mod-nat-extra=m" >> .config
-        echo "CONFIG_PACKAGE_iptables-mod-tproxy=m" >> .config
-        echo "CONFIG_PACKAGE_iptables-mod-extra=m" >> .config
-        echo "CONFIG_PACKAGE_ip6tables=m" >> .config
-        echo "CONFIG_PACKAGE_ip6tables-mod-nat=m" >> .config
-        
-        # 防火墙
-        echo "CONFIG_PACKAGE_firewall=m" >> .config
-        echo "CONFIG_PACKAGE_firewall4=m" >> .config
-        
-        # TurboACC核心功能
-        echo "CONFIG_PACKAGE_luci-app-turboacc=m" >> .config
-        echo "CONFIG_PACKAGE_nft-fullcone=m" >> .config
-        
-        # 根据参数调整Shortcut FE配置
-        if [ "${{ github.event.inputs.include_sfe }}" = "true" ] || [ "${{ github.event.inputs.turboacc_feature }}" = "with-sfe" ]; then
-          echo "启用完整的 Shortcut FE..."
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe=m" >> .config
-          echo "CONFIG_PACKAGE_kmod-fast-classifier=m" >> .config
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=m" >> .config
-        else
-          echo "禁用 Shortcut FE..."
-          echo "# CONFIG_PACKAGE_kmod-shortcut-fe is not set" >> .config
-          echo "# CONFIG_PACKAGE_kmod-fast-classifier is not set" >> .config
-          echo "# CONFIG_PACKAGE_kmod-shortcut-fe-drv is not set" >> .config
-        fi
-        
-        # 根据编译模式决定是否包含完整工具集
-        if [ "${{ github.event.inputs.build_mode }}" = "full" ]; then
-          echo "编译模式: 全kmods+固件+全插件"
-          # 启用完整系统工具集
-          echo "CONFIG_PACKAGE_curl=m" >> .config
-          echo "CONFIG_PACKAGE_bash=m" >> .config
-          echo "CONFIG_PACKAGE_htop=m" >> .config
-          echo "CONFIG_PACKAGE_nano=m" >> .config
-          echo "CONFIG_PACKAGE_vim=m" >> .config
-          echo "CONFIG_PACKAGE_tar=m" >> .config
-          echo "CONFIG_PACKAGE_git=m" >> .config
-          echo "CONFIG_PACKAGE_git-http=m" >> .config
-          echo "CONFIG_PACKAGE_parted=m" >> .config
-          echo "CONFIG_PACKAGE_smartmontools=m" >> .config
-        
-          # 网络诊断工具
-          echo "CONFIG_PACKAGE_iperf3=m" >> .config
-          echo "CONFIG_PACKAGE_tcpdump=m" >> .config
-          echo "CONFIG_PACKAGE_wget=m" >> .config
-          echo "CONFIG_PACKAGE_iputils-ping=m" >> .config
-          echo "CONFIG_PACKAGE_iputils-traceroute=m" >> .config
-          
-          # 启用更多可选包
-          echo "CONFIG_PACKAGE_luci-app-upnp=m" >> .config
-          echo "CONFIG_PACKAGE_luci-app-ddns=m" >> .config
-          echo "CONFIG_PACKAGE_luci-app-wol=m" >> .config
-          echo "CONFIG_PACKAGE_luci-app-statistics=m" >> .config
-        else
-          echo "编译模式: 全kmods+固件"
-          # 精简模式，只保留基础工具
-        fi
-        
-        # 仅内置最基础的系统组件
-        echo "CONFIG_PACKAGE_base-files=y" >> .config
-        echo "CONFIG_PACKAGE_busybox=y" >> .config
-        echo "CONFIG_PACKAGE_dnsmasq=y" >> .config
-        echo "CONFIG_PACKAGE_dropbear=y" >> .config
-        echo "CONFIG_PACKAGE_opkg=y" >> .config
-        echo "CONFIG_PACKAGE_procd=y" >> .config
-        echo "CONFIG_PACKAGE_uci=y" >> .config
-        echo "CONFIG_PACKAGE_urandom-seed=y" >> .config
-        
+        # 应用基础配置
         make defconfig
+        echo "✅ 基础配置完成"
 
+    # ==================== 步骤2: 启用所有内核功能 ====================
+    - name: 启用所有内核功能
+      run: |
+        echo "=== 步骤2: 启用所有内核模块和功能 ==="
+        chmod +x scripts/enable-all-kmods.sh
+        ./scripts/enable-all-kmods.sh
+        
+        # 验证配置
+        echo "=== 配置验证 ==="
+        make oldconfig
+        echo "✅ 内核功能配置完成"
+
+    # ==================== 步骤3: 验证内核配置 ====================
+    - name: 验证内核配置
+      run: |
+        echo "=== 步骤3: 验证内核配置 ==="
+        chmod +x scripts/verify-kernel-config.sh
+        ./scripts/verify-kernel-config.sh
+
+    # ==================== 步骤4: 应用自定义修改 ====================
+    - name: 应用自定义修改
+      run: |
+        echo "=== 步骤4: 应用自定义修改 ==="
+        chmod +x scripts/*.sh
+        echo "应用基础补丁..."
+        ./scripts/apply-custom-patches.sh
+        
+        echo "修复 python 依赖..."
+        ./scripts/fix-dependencies.sh
+        
+        echo "集成TurboACC功能 (仅Fullcone NAT，无SFE)..."
+        # 锁定使用 --no-sfe 参数
+        curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh | bash -s -- --no-sfe
+        
+        # 根据独立选项配置LEDE的Shortcut FE
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+          echo "添加LEDE的Shortcut FE支持..."
+          ./scripts/add-shortcut-fe.sh
+        else
+          echo "跳过LEDE的Shortcut FE..."
+        fi
+        
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "添加iStore相关软件包..."
+          ./scripts/add-packages.sh
+        else
+          echo "跳过iStore相关软件包..."
+        fi
+
+    # ==================== 步骤5: 修复已知编译问题 ====================
+    - name: 修复已知编译问题
+      run: |
+        echo "=== 步骤5: 修复已知编译问题 ==="
+    
+        echo "清理rtpengine包..."
+        rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
+    
+        echo "修复Shortcut FE内核兼容性..."
+        if [ -d "package/qca/shortcut-fe" ]; then
+          chmod +x scripts/fix-sfe-kernel-6.12.sh
+          ./scripts/fix-sfe-kernel-6.12.sh
+        else
+          echo "Shortcut FE目录不存在，跳过修复"
+        fi
+    
+        echo "修复 video feed 编译问题..."
+        if [ -f "feeds/video/libs/mesa/Makefile" ]; then
+          sed -i 's/^define Package\/mesa\/install$/define Package\/mesa\/install-bin/g' feeds/video/libs/mesa/Makefile 2>/dev/null || echo "mesa修复失败"
+        fi
+        
+        if [ -f "feeds/video/libs/xkeyboard-config/Makefile" ]; then
+          sed -i 's/\/usr\/share\/X11\/xkb/\/usr\/share\/X11\/xkb-src/g' feeds/video/libs/xkeyboard-config/Makefile 2>/dev/null || echo "xkeyboard-config修复失败"
+        fi
+
+    # ==================== 步骤6: 修复PPP编译问题 ====================
+    - name: 修复PPP编译问题
+      run: |
+        echo "=== 步骤6: 修复PPP相关编译问题 ==="
+    
+        rm -rf build_dir/target-*/ppp-*
+        rm -rf staging_dir/target-*/ppp
+        rm -rf tmp/build/ppp
+    
+        if [ -d "package/network/services/ppp" ]; then
+          echo "检查PPP包配置..."
+          find package/network/services/ppp -name "*.mk" -exec grep -l "pppoe" {} \;
+        fi
+    
+        find staging_dir -name "*ppp*" -type f -delete 2>/dev/null || true
+        find staging_dir -name ".ppp*" -type f -delete 2>/dev/null || true
+        echo "PPP修复完成"
+
+    # ==================== 步骤7: 修复内核头文件缺失 ====================
+    - name: 修复内核头文件缺失
+      run: |
+        echo "=== 步骤7: 执行全面的内核头文件修复 ==="
+        chmod +x scripts/fix-kernel-headers.sh
+        ./scripts/fix-kernel-headers.sh
+
+    # ==================== 步骤8: 应用 Shortcut FE 内核补丁 ====================
+    - name: 应用 Shortcut FE 内核补丁
+      run: |
+        echo "=== 步骤8: 应用 Shortcut FE 内核补丁 ==="
+        chmod +x scripts/apply-sfe-kernel-patch.sh
+        ./scripts/apply-sfe-kernel-patch.sh
+        
+        if [ -f "target/linux/generic/hack-6.12/953-net-patch-linux-kernel-to-support-shortcut-fe.patch" ]; then
+          echo "✅ Shortcut FE 内核补丁已成功应用"
+          echo "补丁内容预览:"
+          head -20 target/linux/generic/hack-6.12/953-net-patch-linux-kernel-to-support-shortcut-fe.patch
+        else
+          echo "❌ 补丁应用失败"
+          exit 1
+        fi
+
+    # ==================== 步骤9: 专门检查 Shortcut FE ====================
+    - name: 专门检查 Shortcut FE
+      run: |
+        echo "=== 步骤9: 专门检查 Shortcut FE ==="
+        chmod +x scripts/check-shortcut-fe.sh
+        ./scripts/check-shortcut-fe.sh
+
+    # ==================== 步骤10: 检查编译环境 ====================
+    - name: 检查编译环境
+      run: |
+        echo "=== 步骤10: 检查关键包状态 ==="
+        if [ -d "package/libs/libnftnl" ]; then
+            echo "✅ libnftnl 存在"
+            ls package/libs/libnftnl/patches/ 2>/dev/null || echo "无补丁"
+        else
+            echo "❌ libnftnl 不存在"
+        fi
+        
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "检查 iStore 包状态:"
+          for pkg in luci-app-istorex luci-app-quickstart luci-app-store luci-lib-taskd quickstart luci-lib-xterm taskd; do
+              if [ -d "package/$pkg" ]; then
+                  echo "✅ $pkg 存在"
+              else
+                  echo "❌ $pkg 不存在"
+              fi
+          done
+        else
+          echo "跳过 iStore 包检查"
+        fi
+
+    # ==================== 步骤11: 生成版本信息 ====================
     - name: 生成版本信息
       run: |
+        echo "=== 步骤11: 生成版本信息 ==="
         echo "=== 固件版本信息 ===" > version-info.txt
         echo "基础版本: OpenWrt SNAPSHOT (开发版)" >> version-info.txt
         echo "内核版本: 6.12" >> version-info.txt
         echo "包管理器: apk" >> version-info.txt
         echo "编译时间: $(date '+%Y-%m-%d %H:%M:%S')" >> version-info.txt
         echo "目标设备: ${{ github.event.inputs.target_device }}" >> version-info.txt
-        echo "TurboACC功能: ${{ github.event.inputs.turboacc_feature }}" >> version-info.txt
+        echo "TurboACC功能: 仅Fullcone NAT (无SFE)" >> version-info.txt
         echo "包含SFE: ${{ github.event.inputs.include_sfe }}" >> version-info.txt
         echo "编译线程: ${{ github.event.inputs.compile_threads }}" >> version-info.txt
         echo "编译模式: ${{ github.event.inputs.build_mode }}" >> version-info.txt
         echo "包含iStore: ${{ github.event.inputs.include_istore }}" >> version-info.txt
         echo "Git提交: $(git log -1 --format=%h)" >> version-info.txt
-        echo "核心功能: Fullcone NAT + TurboACC" >> version-info.txt
+        echo "核心功能: Fullcone NAT" >> version-info.txt
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+          echo "网络加速: LEDE Shortcut FE" >> version-info.txt
+        else
+          echo "网络加速: 无" >> version-info.txt
+        fi
+        echo "内核配置: 全kmods编译" >> version-info.txt
         if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
           echo "额外功能: iStore 应用商店" >> version-info.txt
         fi
@@ -548,34 +474,25 @@ jobs:
         fi
         cat version-info.txt
 
+    # ==================== 步骤12: 清理有问题的包 ====================
     - name: 清理有问题的包
       run: |
-        echo "清理已知有问题的包..."
-        # 删除有问题的rtpengine包
+        echo "=== 步骤12: 清理已知有问题的包 ==="
         rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
-    
-        # 不再清理Shortcut FE，而是通过修复来解决编译问题
         echo "保留Shortcut FE包，将通过修复解决编译问题"
-    
-    - name: 专门检查 Shortcut FE
-      run: |
-        chmod +x scripts/check-shortcut-fe.sh
-        ./scripts/check-shortcut-fe.sh
-        
+
+    # ==================== 步骤13: 修复已知编译错误 ====================
     - name: 修复已知编译错误
       run: |
-        echo "修复已知的编译问题..."
+        echo "=== 步骤13: 修复已知的编译问题 ==="
     
-        # 修复 gnutls 编译问题
         echo "修复 gnutls 编译问题..."
         if [ -d "feeds/packages/libs/gnutls" ]; then
           echo "应用 gnutls 补丁..."
-          # 清理可能损坏的构建状态
           rm -rf build_dir/target-*/gnutls-*
           rm -rf staging_dir/target-*/gnutls
           rm -rf tmp/build/gnutls
       
-          # 应用补丁文件（如果存在）
           if [ -f "scripts/patches/gnutls-fix.patch" ]; then
             cd feeds/packages/libs/gnutls
             patch -p1 < ../../../../scripts/patches/gnutls-fix.patch
@@ -583,27 +500,26 @@ jobs:
           fi
         fi
     
-        # 修复其他已知问题
         echo "清理有问题的包..."
         rm -rf feeds/telephony/net/rtpengine 2>/dev/null || echo "rtpengine目录不存在"
     
-        # 修复 Shortcut FE
         if [ -d "package/qca/shortcut-fe" ]; then
           chmod +x scripts/fix-sfe-kernel-6.12.sh
           ./scripts/fix-sfe-kernel-6.12.sh
         fi
 
+    # ==================== 步骤14: 构建固件 ====================
     - name: 构建固件（健壮编译策略）
       run: |
-        echo "=== 开始编译固件 ==="
+        echo "=== 步骤14: 开始编译固件 ==="
         echo "编译线程模式: ${{ github.event.inputs.compile_threads }}"
         echo "编译模式: ${{ github.event.inputs.build_mode }}"
         echo "包含iStore: ${{ github.event.inputs.include_istore }}"
+        echo "包含SFE: ${{ github.event.inputs.include_sfe }}"
+        echo "TurboACC: 仅Fullcone NAT (无SFE)"
         
-        # 创建构建日志目录
         mkdir -p logs
         
-        # 根据选择设置线程数
         if [ "${{ github.event.inputs.compile_threads }}" = "multi" ]; then
           CPU_CORES=$(nproc)
           echo "使用多线程模式: $CPU_CORES 个CPU核心"
@@ -615,14 +531,10 @@ jobs:
         fi
         
         echo "使用线程数: $THREADS"
-        
-        # 设置编译环境变量优化
         export FORCE_UNSAFE_CONFIGURE=1
         
-        # 分阶段编译策略，确保即使部分失败也能保留产物
         echo "开始分阶段编译..."
         
-        # 阶段1: 编译工具链和内核
         echo "阶段1: 编译工具链和内核..."
         if make toolchain/install -j$THREADS V=s 2>&1 | tee logs/stage1-toolchain.log; then
           echo "✅ 工具链编译成功"
@@ -630,7 +542,6 @@ jobs:
           echo "⚠️ 工具链编译有警告，继续..."
         fi
         
-        # 阶段2: 编译内核模块
         echo "阶段2: 编译内核模块..."
         if make target/linux/install -j$THREADS V=s 2>&1 | tee logs/stage2-kernel.log; then
           echo "✅ 内核模块编译成功"
@@ -638,7 +549,6 @@ jobs:
           echo "⚠️ 内核模块编译有警告，继续..."
         fi
         
-        # 阶段3: 编译基础包
         echo "阶段3: 编译基础包..."
         if make package/base-files/install package/busybox/install package/opkg/install -j$THREADS V=s 2>&1 | tee logs/stage3-base.log; then
           echo "✅ 基础包编译成功"
@@ -646,9 +556,8 @@ jobs:
           echo "⚠️ 基础包编译有警告，继续..."
         fi
         
-        # 阶段4: 完整编译（允许部分失败）
         echo "阶段4: 完整编译..."
-        set +e  # 允许后续命令失败
+        set +e
         if [ "$THREADS" -eq 1 ]; then
           make -j1 V=s 2>&1 | tee logs/stage4-full.log
           COMPILE_RESULT=${PIPESTATUS[0]}
@@ -656,9 +565,8 @@ jobs:
           make -j$THREADS V=s 2>&1 | tee logs/stage4-full.log
           COMPILE_RESULT=${PIPESTATUS[0]}
         fi
-        set -e  # 恢复错误退出
+        set -e
         
-        # 检查是否有实际产物生成
         if [ -d "bin/targets" ] && [ $(find bin/targets/ -name "*.bin" -o -name "*.img" | wc -l) -gt 0 ]; then
           echo "✅ 固件文件已生成，编译基本成功"
           COMPILE_RESULT=0
@@ -680,30 +588,25 @@ jobs:
 
     - name: 准备上传文件
       run: |
-        # 创建上传目录
         mkdir -p upload/firmware
         mkdir -p upload/packages
         mkdir -p upload/logs
         
-        # 复制固件文件 - 全面查找
         echo "查找固件文件..."
         if [ -d "bin/targets" ]; then
           echo "复制整个targets目录..."
           find bin/targets/ -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" -o -name "*.elf" -o -name "*.dtb" \) -exec cp --parents {} upload/firmware/ \; 2>/dev/null || echo "部分固件文件复制失败"
         fi
         
-        # 复制软件包目录结构
         if [ -d "bin/packages" ]; then
           echo "复制packages目录..."
           cp -r bin/packages/* upload/packages/ 2>/dev/null || echo "部分软件包复制失败"
         fi
         
-        # 复制日志和配置文件
         cp version-info.txt upload/ 2>/dev/null || echo "版本信息文件不存在"
         cp .config upload/ 2>/dev/null || echo ".config 不存在"
         cp logs/*.log upload/logs/ 2>&1 | head -10 || echo "日志文件不存在"
         
-        # 检查文件是否存在
         echo "=== 准备上传的文件 ==="
         find upload/ -type f | head -30
         echo "=== 目录大小 ==="
@@ -713,18 +616,15 @@ jobs:
       run: |
         echo "=== 构建产物检查 ==="
         
-        # 检查固件文件
         FIRMWARE_COUNT=$(find upload/firmware/ -type f | wc -l)
         if [ $FIRMWARE_COUNT -gt 0 ]; then
           echo "✅ 找到 $FIRMWARE_COUNT 个固件文件"
           find upload/firmware/ -type f -name "*.bin" -o -name "*.img" | head -5
         else
           echo "❌ 未找到固件文件"
-          echo "检查原始构建目录..."
           find bin/ -name "*.bin" -o -name "*.img" | head -10
         fi
         
-        # 检查软件包
         PACKAGE_COUNT=$(find upload/packages/ -name "*.apk" | wc -l)
         if [ $PACKAGE_COUNT -gt 0 ]; then
           echo "✅ 找到 $PACKAGE_COUNT 个软件包"
@@ -735,7 +635,7 @@ jobs:
     - name: 上传固件镜像
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_feature }}-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}
+        name: firmware-${{ github.event.inputs.target_device }}-fullcone-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}-sfe-${{ github.event.inputs.include_sfe }}
         path: upload/firmware/
         retention-days: 30
         if-no-files-found: warn
@@ -743,7 +643,7 @@ jobs:
     - name: 上传软件包
       uses: actions/upload-artifact@v4
       with:
-        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}
+        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}-sfe-${{ github.event.inputs.include_sfe }}
         path: upload/packages/
         retention-days: 30
         if-no-files-found: warn
@@ -752,7 +652,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}
+        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.compile_threads }}-${{ github.event.inputs.build_mode }}-istore-${{ github.event.inputs.include_istore }}-sfe-${{ github.event.inputs.include_sfe }}
         path: upload/
         retention-days: 7
         if-no-files-found: warn
