@@ -150,6 +150,19 @@ jobs:
         echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
         echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
         
+        # TurboACC配置 - 确保所有必需的包都启用
+        echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
+        echo "CONFIG_PACKAGE_nft-fullcone=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
+        echo "CONFIG_PACKAGE_kmod-ipt-fullconenat=y" >> .config
+        
+        # Shortcut FE配置
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=y" >> .config
+        fi
+        
         # 根据编译模式配置
         if [ "${{ github.event.inputs.build_mode }}" = "full" ]; then
           echo "CONFIG_PACKAGE_bash=y" >> .config
@@ -159,26 +172,44 @@ jobs:
           echo "CONFIG_PACKAGE_curl=y" >> .config
         fi
         
-        # iStore配置
+        # iStore配置 - 完整的iStore包列表
         if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
           echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
           echo "CONFIG_PACKAGE_luci-app-quickstart=y" >> .config
-        fi
-        
-        # TurboACC配置 (仅Fullcone NAT)
-        echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
-        echo "CONFIG_PACKAGE_nft-fullcone=y" >> .config
-        
-        # Shortcut FE配置
-        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
+          echo "CONFIG_PACKAGE_luci-lib-taskd=y" >> .config
+          echo "CONFIG_PACKAGE_quickstart=y" >> .config
+          echo "CONFIG_PACKAGE_luci-lib-xterm=y" >> .config
+          echo "CONFIG_PACKAGE_taskd=y" >> .config
         fi
         
         # 重新应用配置
         make defconfig
         echo "✅ 核心功能配置完成"
+
+    - name: 强制启用缺失的包
+      run: |
+        echo "=== 强制启用缺失的包 ==="
+        
+        # 检查TurboACC状态并强制启用
+        if ! grep -q "CONFIG_PACKAGE_luci-app-turboacc=y" .config && ! grep -q "CONFIG_PACKAGE_luci-app-turboacc=m" .config; then
+          echo "强制启用 TurboACC..."
+          echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
+          echo "CONFIG_PACKAGE_nft-fullcone=y" >> .config
+        fi
+        
+        # 检查iStore状态并强制启用
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          if ! grep -q "CONFIG_PACKAGE_luci-app-istorex=y" .config && ! grep -q "CONFIG_PACKAGE_luci-app-istorex=m" .config; then
+            echo "强制启用 iStore..."
+            echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
+            echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
+          fi
+        fi
+        
+        # 应用配置更改
+        make oldconfig
+        echo "✅ 强制启用完成"
 
     - name: 启用必需的内核模块
       run: |
@@ -214,6 +245,29 @@ jobs:
         make oldconfig
         echo "✅ 内核模块配置完成"
 
+    - name: 检查包是否存在
+      run: |
+        echo "=== 检查包是否存在 ==="
+        
+        echo "检查TurboACC相关包:"
+        find . -name "*turboacc*" -type d 2>/dev/null | head -10 || echo "未找到turboacc目录"
+        find feeds -name "*turboacc*" -type d 2>/dev/null | head -10 || echo "feeds中未找到turboacc"
+        
+        echo ""
+        echo "检查iStore相关包:"
+        find . -name "*istore*" -type d 2>/dev/null | head -10 || echo "未找到istore目录"
+        find . -name "*store*" -type d | grep -v ".git" | head -10 || echo "未找到store相关目录"
+        
+        echo ""
+        echo "检查Shortcut FE相关包:"
+        find . -name "*shortcut*" -type d 2>/dev/null | head -10 || echo "未找到shortcut目录"
+        
+        echo ""
+        echo "检查当前配置中的关键包:"
+        grep "CONFIG_PACKAGE.*turboacc" .config 2>/dev/null || echo "配置中无turboacc"
+        grep "CONFIG_PACKAGE.*istore" .config 2>/dev/null || echo "配置中无istore"
+        grep "CONFIG_PACKAGE.*store" .config | grep -v "kmod" | head -10 2>/dev/null || echo "配置中无store相关"
+
     - name: 验证配置
       run: |
         echo "=== 配置验证 ==="
@@ -224,8 +278,10 @@ jobs:
             local description=$2
             if grep -q "^${config}=y" .config || grep -q "^${config}=m" .config; then
                 echo "✅ $description"
+                return 0
             else
                 echo "❌ $description"
+                return 1
             fi
         }
         
@@ -236,6 +292,7 @@ jobs:
         check_config "CONFIG_PACKAGE_kmod-fs-ext4" "EXT4文件系统"
         check_config "CONFIG_PACKAGE_kmod-usb-core" "USB核心"
         check_config "CONFIG_PACKAGE_luci-app-turboacc" "TurboACC"
+        check_config "CONFIG_PACKAGE_nft-fullcone" "Fullcone NAT"
         
         if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
           check_config "CONFIG_PACKAGE_kmod-shortcut-fe" "Shortcut FE"
@@ -243,6 +300,20 @@ jobs:
         
         if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
           check_config "CONFIG_PACKAGE_luci-app-istorex" "iStore"
+          check_config "CONFIG_PACKAGE_luci-app-store" "iStore核心"
+        fi
+        
+        echo ""
+        echo "详细的配置状态:"
+        echo "TurboACC相关:"
+        grep "CONFIG_PACKAGE.*turboacc" .config 2>/dev/null || echo "  无配置"
+        echo "Fullcone相关:"
+        grep "CONFIG_PACKAGE.*fullcone" .config 2>/dev/null || echo "  无配置"
+        
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          echo "iStore相关:"
+          grep "CONFIG_PACKAGE.*istore" .config 2>/dev/null || echo "  无配置"
+          grep "CONFIG_PACKAGE.*store" .config | grep -v "kmod" | head -10 2>/dev/null || echo "  无其他store配置"
         fi
         
         echo ""
@@ -340,7 +411,7 @@ jobs:
         
         echo "产物统计:"
         echo "固件文件: $(find upload/firmware -type f | wc -l) 个"
-        echo "软件包: $(find upload/packages -name "*.ipk" | wc -l) 个"
+        echo "软件包: $(find upload/packages -name "*.apk" | wc -l) 个"
         find upload/firmware -type f | head -10
 
     - name: 上传固件
