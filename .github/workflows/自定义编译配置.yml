@@ -1,14 +1,12 @@
-name: 自定义编译配置（优化磁盘空间版）
+name: OpenWrt 完整编译
 
 on:
-  schedule:
-    - cron: '0 4 * * *'
   push:
     branches: [ main ]
   workflow_dispatch:
     inputs:
       target_device:
-        description: '选择编译目标设备'
+        description: '目标设备'
         required: true
         default: 'nanopi-r3s'
         type: choice
@@ -16,33 +14,33 @@ on:
           - nanopi-r3s
           - nanopi-r6s
       include_sfe:
-        description: '是否包含Shortcut FE加速'
+        description: '包含SFE加速'
         type: boolean
         required: false
         default: true
       compile_threads:
-        description: '选择编译线程数'
+        description: '编译线程数'
         required: false
-        default: 'single'
+        default: 'multi'
         type: choice
         options:
           - single
           - multi
       build_mode:
-        description: '选择编译模式 (精简版节省空间)'
+        description: '编译模式'
         required: false
-        default: 'firmware'
+        default: 'full'
         type: choice
         options:
           - firmware
           - full
       include_istore:
-        description: '是否包含iStore相关功能'
+        description: '包含iStore应用商店'
         type: boolean
         required: false
-        default: false  # 默认关闭以节省空间
+        default: true
       turboacc_method:
-        description: '选择TurboACC加速方案'
+        description: '加速方案'
         required: false
         default: 'immortalwrt'
         type: choice
@@ -63,108 +61,214 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: recursive
-        fetch-depth: 1  # 浅克隆节省空间
+        fetch-depth: 0
 
-    - name: 初始磁盘空间检查
-      run: |
-        echo "=== 初始磁盘空间 ==="
-        df -h
-        echo "=== 内存使用 ==="
-        free -h
-
-    - name: 设置构建缓存（优化版）
+    - name: 设置构建缓存
       uses: actions/cache@v3
       with:
         path: |
           dl
           build_dir/target-*/toolchain-*
           staging_dir/toolchain-*
-        key: ${{ runner.os }}-openwrt-${{ hashFiles('configs/*.config', 'feeds.conf') }}
+          /tmp/ccache
+        key: ${{ runner.os }}-openwrt-essential-${{ hashFiles('configs/*.config', 'feeds.conf') }}
         restore-keys: |
-          ${{ runner.os }}-openwrt-
+          ${{ runner.os }}-openwrt-essential-
+          
+    - name: 设置完整编译环境
+      run: bash scripts/setup-environment.sh
 
-    - name: 安装系统依赖（完整版）
-      run: bash scripts/install-dependencies.sh full
-
-    - name: 配置 feeds
+    - name: 配置 feeds 源
       run: |
+        echo "=== 配置完整 feeds 源 ==="
         cat > feeds.conf << 'EOF'
         src-git packages https://github.com/openwrt/packages.git
         src-git luci https://github.com/openwrt/luci.git
         src-git routing https://github.com/openwrt/routing.git
+        src-git telephony https://github.com/openwrt/telephony.git
         EOF
+
+    - name: 更新和安装 feeds
+      run: |
+        echo "=== 更新 feeds ==="
         ./scripts/feeds update -a
+        echo "=== 安装 feeds ==="
         ./scripts/feeds install -a
 
     - name: 修复 nftables 问题
-      run: bash scripts/fix-nftables-issue.sh ${{ github.event.inputs.turboacc_method }}
+      run: |
+        echo "=== 修复 nftables 编译问题 ==="
+        
+        # 移除有问题的补丁
+        rm -f package/network/utils/nftables/patches/001-fix-pppox-includes.patch 2>/dev/null || true
+        
+        # 清理补丁残留
+        find package/network/utils/nftables/patches -name "*.rej" -delete 2>/dev/null || true
+        find package/network/utils/nftables/patches -name "*.orig" -delete 2>/dev/null || true
+        
+        # 清理构建缓存
+        rm -rf build_dir/target-*/nftables-* 2>/dev/null || true
 
-    - name: 应用 TurboACC 方案
-      run: bash scripts/apply-turboacc.sh ${{ github.event.inputs.turboacc_method }} ${{ github.event.inputs.include_sfe }}
+    - name: 应用 TurboACC 加速方案
+      run: |
+        echo "=== 应用 TurboACC 加速方案 ==="
+        
+        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
+          echo "使用脚本方案安装 TurboACC..."
+          
+          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+            echo "安装完整 TurboACC (包含 SFE)"
+            curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+            chmod +x add_turboacc.sh
+            bash add_turboacc.sh
+          else
+            echo "安装 TurboACC (不包含 SFE)"
+            curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+            chmod +x add_turboacc.sh
+            bash add_turboacc.sh --no-sfe
+          fi
+          
+        else
+          echo "使用 ImmortalWrt Fullcone NAT 标准方案"
+          # 补丁在后续步骤中应用
+        fi
 
     - name: 运行 prereq 检查
-      run: make prereq
-
-    - name: 应用基础配置
       run: |
-        if [ "${{ github.event.inputs.target_device }}" = "nanopi-r3s" ]; then
-          cp configs/nanopi-r3s.config .config
-        else
-          cp configs/nanopi-r6s.config .config
-        fi
-        make defconfig
+        echo "=== 运行 prereq 依赖检查 ==="
+        make prereq
+        echo "✅ prereq 检查通过"
 
-    - name: 配置防火墙功能
-      run: bash scripts/configure-firewall.sh ${{ github.event.inputs.turboacc_method }} ${{ github.event.inputs.include_sfe }} ${{ github.event.inputs.build_mode }} ${{ github.event.inputs.include_istore }}
-
-    - name: 优化构建配置（节省空间）
-      run: bash scripts/optimize-build.sh ${{ github.event.inputs.build_mode }} ${{ github.event.inputs.include_istore }}
-
-    - name: 编译前磁盘清理
-      run: bash scripts/clean-disk-space.sh
-
-    - name: 编译固件（优化版）
+    - name: 应用完整配置
       run: |
-        echo "=== 编译前磁盘空间 ==="
+        bash scripts/apply-config.sh \
+          "${{ github.event.inputs.target_device }}" \
+          "${{ github.event.inputs.turboacc_method }}" \
+          "${{ github.event.inputs.include_sfe }}" \
+          "${{ github.event.inputs.include_istore }}" \
+          "${{ github.event.inputs.build_mode }}"
+
+    - name: 磁盘空间优化
+      run: |
+        echo "=== 编译前磁盘空间优化 ==="
+        echo "当前磁盘空间:"
         df -h
         
-        # 设置编译环境
-        export FORCE_UNSAFE_CONFIGURE=1
+        # 选择性清理，保留核心文件
+        sudo apt clean
+        sudo rm -rf /var/lib/apt/lists/*
         
-        # 根据线程数编译
+        echo "优化后磁盘空间:"
+        df -h
+
+    - name: 编译固件
+      run: |
+        echo "=== 开始完整编译 ==="
+        
+        # 设置环境变量
+        export FORCE_UNSAFE_CONFIGURE=1
+        export CCACHE_DIR="/tmp/ccache"
+        
+        # 设置编译线程数
         if [ "${{ github.event.inputs.compile_threads }}" = "multi" ]; then
-          THREADS=$(($(nproc) - 1))  # 留一个核心给系统
+          THREADS=$(nproc)
+          echo "使用多线程编译: $THREADS 个 CPU 核心"
         else
           THREADS=1
+          echo "使用单线程编译"
         fi
         
-        echo "使用 $THREADS 个线程编译"
+        # 开始编译（完整输出）
+        echo "编译开始时间: $(date)"
+        make -j$THREADS V=s 2>&1 | tee build.log
         
-        # 编译（减少详细输出以节省日志空间）
-        make -j$THREADS V=sc 2>&1 | tee build.log | grep -E "(error|warning|Error|Warning)" || true
+        echo "编译结束时间: $(date)"
+        echo "=== 编译完成 ==="
+
+    - name: 验证编译结果
+      if: always()
+      run: |
+        echo "=== 编译结果验证 ==="
         
-        echo "=== 编译后磁盘空间 ==="
+        # 检查固件文件
+        if find bin/targets -name "*.bin" -o -name "*.img" | grep -q .; then
+          echo "✅ 编译成功 - 找到固件文件"
+          echo "生成的固件:"
+          find bin/targets -name "*.bin" -o -name "*.img" | head -10
+        else
+          echo "❌ 编译失败 - 未找到固件文件"
+          echo "最后 200 行编译日志:"
+          tail -200 build.log 2>/dev/null || echo "无编译日志文件"
+          exit 1
+        fi
+        
+        # 检查 iStore 包（如果启用）
+        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+          if find bin/packages -name "*istore*" -o -name "*store*" | grep -q .; then
+            echo "✅ iStore 相关包已生成"
+            find bin/packages -name "*istore*" -o -name "*store*" | head -5
+          else
+            echo "⚠️ 未找到 iStore 相关包"
+          fi
+        fi
+        
+        echo "最终磁盘空间:"
         df -h
 
-    - name: 编译后磁盘清理
-      if: always()
+    - name: 收集构建产物
+      if: success()
       run: |
-        echo "=== 最终磁盘空间清理 ==="
-        bash scripts/clean-disk-space.sh
-
-    - name: 收集产物（最小化）
-      if: always()
-      run: |
-        mkdir -p upload/firmware
-        # 只收集最终的固件文件
-        find bin/targets -name "*-sysupgrade.bin" -o -name "*.img.gz" -o -name "*.img" | head -5 | xargs -I {} cp {} upload/firmware/ 2>/dev/null || true
-        echo "收集的固件:"
-        ls -la upload/firmware/ || echo "无固件文件"
+        echo "=== 收集构建产物 ==="
+        mkdir -p upload/firmware upload/packages upload/logs
+        
+        # 收集所有固件文件
+        find bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" \) -exec cp --parents {} upload/firmware/ \; 2>/dev/null || true
+        
+        # 收集软件包
+        if [ -d "bin/packages" ]; then
+          find bin/packages -name "*.ipk" | head -50 | xargs -I {} cp {} upload/packages/ 2>/dev/null || true
+        fi
+        
+        # 收集编译信息
+        cp .config upload/ 2>/dev/null || true
+        cp build.log upload/logs/ 2>/dev/null || true
+        
+        # 生成版本信息
+        {
+          echo "固件版本: OpenWrt 完整编译"
+          echo "编译时间: $(date '+%Y-%m-%d %H:%M:%S')"
+          echo "目标设备: ${{ github.event.inputs.target_device }}"
+          echo "编译模式: ${{ github.event.inputs.build_mode }}"
+          echo "TurboACC方案: ${{ github.event.inputs.turboacc_method }}"
+          echo "包含 iStore: ${{ github.event.inputs.include_istore }}"
+          echo "包含 SFE: ${{ github.event.inputs.include_sfe }}"
+          echo "Git提交: $(git log -1 --format='%h - %s')"
+        } > upload/version-info.txt
+        
+        echo "产物统计:"
+        echo "固件文件: $(find upload/firmware -type f 2>/dev/null | wc -l || echo 0) 个"
+        echo "软件包: $(find upload/packages -name "*.ipk" 2>/dev/null | wc -l || echo 0) 个"
 
     - name: 上传固件
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_method }}
+        name: firmware-${{ github.event.inputs.target_device }}-full
         path: upload/firmware/
         retention-days: 7
+        if-no-files-found: error
+
+    - name: 上传软件包
+      uses: actions/upload-artifact@v4
+      with:
+        name: packages-${{ github.event.inputs.target_device }}-full
+        path: upload/packages/
+        retention-days: 7
+        if-no-files-found: warn
+
+    - name: 上传构建信息
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-info-${{ github.event.inputs.target_device }}
+        path: upload/
+        retention-days: 3
         if-no-files-found: warn
