@@ -1,4 +1,4 @@
-name: 自定义编译配置
+name: 自定义编译配置（优化磁盘空间版）
 
 on:
   schedule:
@@ -29,7 +29,7 @@ on:
           - single
           - multi
       build_mode:
-        description: '选择编译模式'
+        description: '选择编译模式 (精简版节省空间)'
         required: false
         default: 'firmware'
         type: choice
@@ -40,7 +40,7 @@ on:
         description: '是否包含iStore相关功能'
         type: boolean
         required: false
-        default: true
+        default: false  # 默认关闭以节省空间
       turboacc_method:
         description: '选择TurboACC加速方案'
         required: false
@@ -63,34 +63,33 @@ jobs:
       uses: actions/checkout@v4
       with:
         submodules: recursive
-        fetch-depth: 0
+        fetch-depth: 1  # 浅克隆节省空间
 
-    - name: 设置构建缓存
+    - name: 初始磁盘空间检查
+      run: |
+        echo "=== 初始磁盘空间 ==="
+        df -h
+        echo "=== 内存使用 ==="
+        free -h
+
+    - name: 设置构建缓存（优化版）
       uses: actions/cache@v3
       with:
         path: |
           dl
-          build_dir
-          staging_dir
-          tmp
-          .config
-          feeds
-        key: ${{ runner.os }}-openwrt-${{ hashFiles('configs/*.config', 'feeds.conf', '.config') }}
+          build_dir/target-*/toolchain-*
+          staging_dir/toolchain-*
+        key: ${{ runner.os }}-openwrt-${{ hashFiles('configs/*.config', 'feeds.conf') }}
         restore-keys: |
           ${{ runner.os }}-openwrt-
 
-    - name: 安装系统依赖
+    - name: 安装系统依赖（最小化）
       run: |
+        echo "=== 安装最小化系统依赖 ==="
         sudo apt update -y
-        sudo apt full-upgrade -y
-        sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gcc-multilib g++-multilib gettext genisoimage git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool llvm lrzsz libnsl-dev ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
-
-    - name: 配置环境
-      run: |
-        echo "设备: ${{ github.event.inputs.target_device }}"
-        echo "线程: ${{ github.event.inputs.compile_threads }}"
-        echo "TurboACC方案: ${{ github.event.inputs.turboacc_method }}"
-        nproc
+        # 只安装核心编译依赖
+        sudo apt install -y build-essential ccache curl file g++ gawk gettext git libncurses5-dev libssl-dev python3 python3-distutils rsync unzip zlib1g-dev
+        sudo apt clean
 
     - name: 配置 feeds
       run: |
@@ -98,7 +97,6 @@ jobs:
         src-git packages https://github.com/openwrt/packages.git
         src-git luci https://github.com/openwrt/luci.git
         src-git routing https://github.com/openwrt/routing.git
-        src-git telephony https://github.com/openwrt/telephony.git
         EOF
         ./scripts/feeds update -a
         ./scripts/feeds install -a
@@ -124,33 +122,54 @@ jobs:
     - name: 配置防火墙功能
       run: bash scripts/configure-firewall.sh ${{ github.event.inputs.turboacc_method }} ${{ github.event.inputs.include_sfe }} ${{ github.event.inputs.build_mode }} ${{ github.event.inputs.include_istore }}
 
-    - name: 编译固件
+    - name: 优化构建配置（节省空间）
+      run: bash scripts/optimize-build.sh ${{ github.event.inputs.build_mode }} ${{ github.event.inputs.include_istore }}
+
+    - name: 编译前磁盘清理
+      run: bash scripts/clean-disk-space.sh
+
+    - name: 编译固件（优化版）
       run: |
+        echo "=== 编译前磁盘空间 ==="
+        df -h
+        
+        # 设置编译环境
+        export FORCE_UNSAFE_CONFIGURE=1
+        
+        # 根据线程数编译
         if [ "${{ github.event.inputs.compile_threads }}" = "multi" ]; then
-          THREADS=$(nproc)
+          THREADS=$(($(nproc) - 1))  # 留一个核心给系统
         else
           THREADS=1
         fi
-        export FORCE_UNSAFE_CONFIGURE=1
-        make -j$THREADS V=s
+        
+        echo "使用 $THREADS 个线程编译"
+        
+        # 编译（减少详细输出以节省日志空间）
+        make -j$THREADS V=sc 2>&1 | tee build.log | grep -E "(error|warning|Error|Warning)" || true
+        
+        echo "=== 编译后磁盘空间 ==="
+        df -h
 
-    - name: 收集产物
+    - name: 编译后磁盘清理
       if: always()
       run: |
-        mkdir -p upload/firmware upload/packages
-        find bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" \) -exec cp --parents {} upload/firmware/ \; 2>/dev/null || true
-        [ -d "bin/packages" ] && cp -r bin/packages/* upload/packages/ 2>/dev/null || true
+        echo "=== 最终磁盘空间清理 ==="
+        bash scripts/clean-disk-space.sh
+
+    - name: 收集产物（最小化）
+      if: always()
+      run: |
+        mkdir -p upload/firmware
+        # 只收集最终的固件文件
+        find bin/targets -name "*-sysupgrade.bin" -o -name "*.img.gz" -o -name "*.img" | head -5 | xargs -I {} cp {} upload/firmware/ 2>/dev/null || true
+        echo "收集的固件:"
+        ls -la upload/firmware/ || echo "无固件文件"
 
     - name: 上传固件
       uses: actions/upload-artifact@v4
       with:
         name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_method }}
         path: upload/firmware/
-        if-no-files-found: warn
-
-    - name: 上传软件包
-      uses: actions/upload-artifact@v4
-      with:
-        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_method }}
-        path: upload/packages/
+        retention-days: 7
         if-no-files-found: warn
