@@ -1,13 +1,6 @@
 --- a/src/rule.c
 +++ b/src/rule.c
-@@ -1,5 +1,6 @@
- /*
-  * Copyright (c) 2008-2020 Patrick McHardy <kaber@trash.net>
-+ * Copyright (c) 2024 OpenWrt authors
-  *
-  * This program is free software; you can redistribute it and/or modify
-  * it under the terms of the GNU General Public License version 2 as
-@@ -36,8 +37,12 @@
+@@ -36,7 +36,10 @@
  #include <linux/netfilter.h>
  #include <linux/netfilter_arp.h>
  #include <linux/netfilter_bridge.h>
@@ -20,5 +13,3 @@
 +#endif
 +
  #include <expression.h>
- #include <statement.h>
- #include <rule.h>
