@@ -11,8 +11,11 @@ echo "=== 应用配置（无终端环境）==="
 TARGET_DEVICE=$1
 TURBOACC_METHOD=$2
 INCLUDE_SFE=$3
+INCLUDE_ISTORE=$4
+BUILD_MODE=$5
 
-echo "参数: TARGET_DEVICE=$TARGET_DEVICE, TURBOACC_METHOD=$TURBOACC_METHOD, INCLUDE_SFE=$INCLUDE_SFE"
+echo "参数: TARGET_DEVICE=$TARGET_DEVICE, TURBOACC_METHOD=$TURBOACC_METHOD"
+echo "参数: INCLUDE_SFE=$INCLUDE_SFE, INCLUDE_ISTORE=$INCLUDE_ISTORE, BUILD_MODE=$BUILD_MODE"
 
 # 应用基础设备配置
 apply_device_config() {
@@ -107,6 +110,70 @@ apply_immortalwrt_turboacc() {
     fi
 }
 
+# 应用 iStore 配置
+apply_istore_config() {
+    echo "应用 iStore 配置: $INCLUDE_ISTORE"
+    
+    if [ "$INCLUDE_ISTORE" = "true" ]; then
+        echo "✅ 启用 iStore 相关功能"
+        
+        # iStore 核心包
+        echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
+        echo "CONFIG_PACKAGE_luci-app-quickstart=y" >> .config
+        
+        # iStore 依赖
+        echo "CONFIG_PACKAGE_luci-lib-xray=y" >> .config
+        echo "CONFIG_PACKAGE_luci-compat=y" >> .config
+        
+        # 常用工具（iStore 需要）
+        echo "CONFIG_PACKAGE_bash=y" >> .config
+        echo "CONFIG_PACKAGE_curl=y" >> .config
+        echo "CONFIG_PACKAGE_wget-ssl=y" >> .config
+        echo "CONFIG_PACKAGE_opkg=y" >> .config
+        
+        # 文件管理
+        echo "CONFIG_PACKAGE_luci-app-filemanager=y" >> .config
+        
+        # Docker 支持（可选）
+        echo "# CONFIG_PACKAGE_luci-app-dockerman=y" >> .config
+        
+        echo "✅ iStore 配置完成"
+    else
+        echo "ℹ️ 不包含 iStore"
+        echo "# CONFIG_PACKAGE_luci-app-istorex is not set" >> .config
+        echo "# CONFIG_PACKAGE_luci-app-store is not set" >> .config
+    fi
+}
+
+# 应用编译模式配置
+apply_build_mode() {
+    echo "应用编译模式: $BUILD_MODE"
+    
+    case "$BUILD_MODE" in
+        "full")
+            echo "✅ 使用完整模式"
+            echo "CONFIG_PACKAGE_bash=y" >> .config
+            echo "CONFIG_PACKAGE_htop=y" >> .config
+            echo "CONFIG_PACKAGE_nano=y" >> .config
+            echo "CONFIG_PACKAGE_vim=y" >> .config
+            echo "CONFIG_PACKAGE_curl=y" >> .config
+            echo "CONFIG_PACKAGE_tmux=y" >> .config
+            echo "CONFIG_PACKAGE_git=y" >> .config
+            ;;
+        "firmware"|"")
+            echo "ℹ️ 使用固件模式（基础功能）"
+            # 基础工具
+            echo "CONFIG_PACKAGE_bash=y" >> .config
+            echo "CONFIG_PACKAGE_curl=y" >> .config
+            ;;
+        *)
+            echo "❌ 未知的编译模式: $BUILD_MODE"
+            exit 1
+            ;;
+    esac
+}
+
 # 应用必需的内核模块
 apply_kernel_modules() {
     echo "应用必需的内核模块..."
@@ -121,6 +188,7 @@ apply_kernel_modules() {
     echo "CONFIG_PACKAGE_kmod-fs-ext4=y" >> .config
     echo "CONFIG_PACKAGE_kmod-fs-squashfs=y" >> .config
     echo "CONFIG_PACKAGE_kmod-fs-vfat=y" >> .config
+    echo "CONFIG_PACKAGE_kmod-fs-ntfs=y" >> .config
     
     # USB支持
     echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
@@ -135,6 +203,8 @@ apply_kernel_modules() {
     # 其他核心模块
     echo "CONFIG_PACKAGE_kmod-nls-base=y" >> .config
     echo "CONFIG_PACKAGE_kmod-nls-utf8=y" >> .config
+    echo "CONFIG_PACKAGE_kmod-nls-cp437=y" >> .config
+    echo "CONFIG_PACKAGE_kmod-nls-iso8859-1=y" >> .config
 }
 
 # 应用配置并验证
@@ -147,6 +217,12 @@ apply_and_validate() {
     # 应用 TurboACC 配置
     apply_turboacc_config
     
+    # 应用 iStore 配置
+    apply_istore_config
+    
+    # 应用编译模式
+    apply_build_mode
+    
     # 应用内核模块
     apply_kernel_modules
     
@@ -157,7 +233,17 @@ apply_and_validate() {
     # 验证配置
     echo "=== 最终配置验证 ==="
     echo "检查关键配置项:"
-    grep -E "CONFIG_PACKAGE_(firewall4|nftables-json|kmod-nft-fullcone)" .config || echo "⚠️ 某些配置可能缺失"
+    
+    echo "TurboACC:"
+    grep -E "CONFIG_PACKAGE_(luci-app-turboacc|kmod-nft-fullcone)" .config || echo "⚠️ TurboACC 配置可能缺失"
+    
+    echo "iStore:"
+    if [ "$INCLUDE_ISTORE" = "true" ]; then
+        grep -E "CONFIG_PACKAGE_luci-app-(istorex|store|quickstart)" .config || echo "⚠️ iStore 配置可能缺失"
+    fi
+    
+    echo "网络模块:"
+    grep -E "CONFIG_PACKAGE_(firewall4|nftables-json)" .config || echo "⚠️ 网络配置可能缺失"
     
     echo "✅ 配置应用完成"
 }
@@ -168,6 +254,11 @@ main() {
         echo "❌ 缺少目标设备参数"
         exit 1
     fi
+    
+    # 设置默认值
+    INCLUDE_SFE=${INCLUDE_SFE:-"true"}
+    INCLUDE_ISTORE=${INCLUDE_ISTORE:-"true"}
+    BUILD_MODE=${BUILD_MODE:-"firmware"}
     
     apply_and_validate
 }
