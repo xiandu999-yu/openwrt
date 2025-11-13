@@ -7,6 +7,11 @@ set -e
 
 echo "=== 开始修复 nftables 编译问题 ==="
 
+# 参数处理
+TURBOACC_METHOD=${1:-"immortalwrt"}  # 默认值
+
+echo "参数: TURBOACC_METHOD=$TURBOACC_METHOD"
+
 # 移除有问题的补丁文件
 echo "步骤1: 清理有问题的补丁..."
 if [ -f "package/network/utils/nftables/patches/001-fix-pppox-includes.patch" ]; then
@@ -200,18 +205,25 @@ clean_build_cache() {
 
 # 主执行函数
 main() {
-    local turboacc_method=$1
+    # 基础清理（所有方案都需要）
+    clean_build_cache
     
-    if [ "$turboacc_method" = "immortalwrt" ]; then
-        echo "应用 ImmortalWrt Fullcone NAT 方案..."
-        download_immortalwrt_patches
-        update_nftables_config
-        clean_build_cache
-    else
-        echo "使用脚本方案，跳过 ImmortalWrt 补丁应用"
-        # 脚本方案会自动处理，这里只做基础清理
-        clean_build_cache
-    fi
+    # 根据方案选择操作
+    case "$TURBOACC_METHOD" in
+        "immortalwrt"|"")
+            echo "应用 ImmortalWrt Fullcone NAT 方案..."
+            download_immortalwrt_patches
+            update_nftables_config
+            ;;
+        "script")
+            echo "使用脚本方案，跳过 ImmortalWrt 补丁应用"
+            ;;
+        *)
+            echo "❌ 未知的 TurboACC 方案: $TURBOACC_METHOD"
+            echo "可用方案: script, immortalwrt"
+            exit 1
+            ;;
+    esac
     
     echo "=== nftables 问题修复完成 ==="
 }
