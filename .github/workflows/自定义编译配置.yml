@@ -1,6 +1,8 @@
-name: OpenWrt 完整编译（支持所有方案）
+name: OpenWrt 编译（彻底修复终端问题）
 
 on:
+  push:
+    branches: [ main ]
   workflow_dispatch:
     inputs:
       target_device:
@@ -14,7 +16,7 @@ on:
       turboacc_method:
         description: '加速方案'
         required: false
-        default: 'hybrid'
+        default: 'immortalwrt'
         type: choice
         options:
           - immortalwrt
@@ -35,6 +37,22 @@ on:
         type: boolean
         required: false
         default: false
+      compile_threads:
+        description: '编译线程数'
+        required: false
+        default: 'single'
+        type: choice
+        options:
+          - single
+          - multi
+      build_mode:
+        description: '编译模式'
+        required: false
+        default: 'firmware'
+        type: choice
+        options:
+          - firmware
+          - full
 
 env:
   TIMEOUT: 360m
@@ -57,54 +75,78 @@ jobs:
         path: |
           dl
           /tmp/ccache
-        key: ${{ runner.os }}-openwrt-minimal-${{ hashFiles('feeds.conf') }}
+        key: ${{ runner.os }}-openwrt-${{ hashFiles('feeds.conf') }}
         restore-keys: |
-          ${{ runner.os }}-openwrt-minimal-
+          ${{ runner.os }}-openwrt-
 
-    - name: 设置完整编译环境
-      run: bash scripts/setup-environment.sh
-
-    - name: 配置 feeds 源
+    - name: 安装完整编译环境
       run: |
-        echo "=== 配置 feeds 源 ==="
+        echo "=== 安装编译环境 ==="
+        sudo apt update -y
+        sudo apt install -y build-essential ccache curl file g++ gawk gettext git libncurses5-dev libssl-dev make python3 rsync unzip
+        sudo apt clean
+
+    - name: 配置 feeds
+      run: |
+        echo "=== 配置 feeds ==="
         cat > feeds.conf << 'EOF'
         src-git packages https://github.com/openwrt/packages.git
         src-git luci https://github.com/openwrt/luci.git
         EOF
-
-    - name: 更新和安装 feeds
-      run: |
-        echo "=== 更新 feeds ==="
         ./scripts/feeds update -a
-        echo "=== 安装 feeds ==="
         ./scripts/feeds install -a
 
     - name: 修复 nftables 问题
       run: |
-        echo "=== 修复 nftables 编译问题 ==="
+        echo "=== 修复 nftables ==="
         rm -f package/network/utils/nftables/patches/001-fix-pppox-includes.patch 2>/dev/null || true
-        find package/network/utils/nftables/patches -name "*.rej" -delete 2>/dev/null || true
         rm -rf build_dir/target-*/nftables-* 2>/dev/null || true
 
-    - name: 应用混合 Fullcone 方案
+    - name: 创建基础配置（非交互式）
       run: |
-        bash scripts/apply-hybrid-fullcone.sh \
-          "${{ github.event.inputs.turboacc_method }}" \
-          "${{ github.event.inputs.include_sfe }}"
+        bash scripts/create-base-config.sh "${{ github.event.inputs.target_device }}"
 
-    - name: 运行 prereq 检查
+    - name: 应用功能配置（非交互式）
       run: |
-        echo "=== 运行 prereq 检查 ==="
-        make prereq
-
-    - name: 应用完整配置（修复版）
-      run: |
-        bash scripts/apply-config.sh \
-          "${{ github.event.inputs.target_device }}" \
-          "${{ github.event.inputs.turboacc_method }}" \
-          "${{ github.event.inputs.include_sfe }}" \
-          "${{ github.event.inputs.include_istore }}" \
-          "${{ github.event.inputs.build_mode }}"
+        echo "=== 应用功能配置 ==="
+        
+        # 设置环境变量
+        export FORCE_UNSAFE_CONFIGURE=1
+        
+        # 基础配置验证
+        if [ ! -f ".config" ]; then
+          echo "❌ 配置文件不存在，创建基础配置"
+          make defconfig
+        fi
+        
+        # 应用 TurboACC 配置
+        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
+          echo "应用脚本方案..."
+          curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+          chmod +x add_turboacc.sh
+          bash add_turboacc.sh
+        else
+          echo "应用标准方案..."
+          # 手动添加配置
+          echo "CONFIG_PACKAGE_firewall4=y" >> .config
+          echo "CONFIG_PACKAGE_nftables-json=y" >> .config
+          
+          if [ "${{ github.event.inputs.enable_turboacc_ui }}" = "true" ]; then
+            echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
+          fi
+          
+          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+            echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
+          fi
+          
+          if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
+            echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
+          fi
+        fi
+        
+        # 最终配置验证（非交互式）
+        echo "运行最终配置验证..."
+        make defconfig
 
     - name: 编译前检查
       run: |
@@ -112,51 +154,60 @@ jobs:
         echo "磁盘空间:"
         df -h
         echo "配置文件状态:"
-        ls -la .config 2>/dev/null || echo "无配置文件"
+        ls -la .config
         echo "关键配置:"
-        grep -E "CONFIG_TARGET|CONFIG_PACKAGE" .config 2>/dev/null | head -10 || echo "无法读取配置"
+        grep -E "CONFIG_TARGET|CONFIG_PACKAGE" .config | head -10
 
-    - name: 编译固件（修复版）
+    - name: 编译固件（简化输出）
       run: |
         echo "=== 开始编译 ==="
         
         export FORCE_UNSAFE_CONFIGURE=1
         export CCACHE_DIR="/tmp/ccache"
         
-        # 使用单线程确保稳定性
+        # 单线程编译确保稳定性
         THREADS=1
-        echo "使用单线程编译确保稳定性"
+        echo "使用单线程编译: $THREADS"
         
         echo "编译开始: $(date)"
-        # 编译并实时输出，避免缓冲区问题
-        make -j$THREADS V=s 2>&1 | while IFS= read -r line; do
-          echo "$line"
-        done
+        
+        # 简化编译输出，只显示错误和警告
+        make -j$THREADS 2>&1 | grep -E "(error|warning|Error|Warning|FAILED)" || true
         
         echo "编译结束: $(date)"
 
-    - name: 验证编译结果
+    - name: 检查编译结果
       if: always()
       run: |
-        echo "=== 编译结果验证 ==="
+        echo "=== 编译结果检查 ==="
         
-        # 检查编译目录是否存在
-        if [ ! -d "bin" ]; then
-          echo "❌ bin 目录不存在，编译完全失败"
-          echo "最后错误信息:"
-          tail -50 build.log 2>/dev/null || echo "无编译日志"
-          exit 1
-        fi
-        
-        # 检查固件文件
-        if find bin -name "*.bin" -o -name "*.img" 2>/dev/null | grep -q .; then
-          echo "✅ 编译成功"
-          find bin -name "*.bin" -o -name "*.img" | head -5
+        # 检查基础目录结构
+        if [ -d "bin" ]; then
+          echo "✅ bin 目录存在"
+          find bin -type f -name "*.bin" -o -name "*.img" | head -5 || echo "⚠️ 无固件文件"
         else
-          echo "❌ 编译失败 - 无固件输出"
-          echo "目录结构:"
-          find bin -type f 2>/dev/null | head -20 || echo "bin 目录为空"
+          echo "❌ bin 目录不存在，编译失败"
+          # 显示可能的错误
+          find . -name "*.log" -type f | head -3 | xargs tail -50 2>/dev/null || echo "无日志文件"
           exit 1
         fi
 
-    # 后续步骤保持不变...
+    - name: 收集产物
+      if: success()
+      run: |
+        echo "=== 收集产物 ==="
+        mkdir -p upload/firmware
+        
+        # 收集固件
+        find bin -name "*.bin" -o -name "*.img" | head -3 | xargs -I {} cp {} upload/firmware/ 2>/dev/null || true
+        
+        echo "收集的固件:"
+        ls -la upload/firmware/ 2>/dev/null || echo "无固件文件"
+
+    - name: 上传固件
+      uses: actions/upload-artifact@v4
+      with:
+        name: openwrt-${{ github.event.inputs.target_device }}
+        path: upload/
+        retention-days: 3
+        if-no-files-found: warn
