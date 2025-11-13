@@ -137,10 +137,10 @@ jobs:
         curl -sSL https://raw.githubusercontent.com/istoreos/istoreos/istoreos-24.10/package/libs/libnftnl/patches/999-11-masq-fullcone-expr.patch \
           -o package/libs/libnftnl/patches/999-11-masq-fullcone-expr.patch || echo "libnftnl 补丁下载失败"
         
-        # 3. 下载 nftables Fullcone 支持补丁 (从 iStoreOS)
+        # 3. 下载 nftables Fullcone 支持补丁 (从 LEDE)
         echo "下载 nftables Fullcone 支持补丁..."
-        curl -sSL https://raw.githubusercontent.com/istoreos/istoreos/istoreos-24.10/package/network/utils/nftables/patches/999-11-masq-fullcone-flag.patch \
-          -o package/network/utils/nftables/patches/999-11-masq-fullcone-flag.patch || echo "nftables 补丁下载失败"
+        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/refs/heads/master/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch \
+          -o package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch || echo "nftables 补丁下载失败"
         
         # 4. 下载 firewall4 Fullcone 支持补丁 (从 iStoreOS)
         echo "下载 firewall4 Fullcone 支持补丁..."
@@ -284,7 +284,7 @@ jobs:
           echo "❌ libnftnl Fullcone 支持缺失"
         fi
         
-        if [ -f "package/network/utils/nftables/patches/999-11-masq-fullcone-flag.patch" ]; then
+        if [ -f "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch" ]; then
           echo "✅ nftables Fullcone 支持已添加"
         else
           echo "❌ nftables Fullcone 支持缺失"
