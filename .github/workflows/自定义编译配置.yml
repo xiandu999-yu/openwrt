@@ -131,7 +131,7 @@ jobs:
         # 1. 下载 BCM Fullcone NAT 内核补丁 (6.6内核)
         echo "下载 BCM Fullcone NAT 内核补丁..."
         curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/generic/hack-6.6/982-add-bcm-fullconenat-support.patch \
-          -o target/linux/generic/hack-6.6/982-add-bcm-fullconenat-support.patch
+          -o target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch
         
         # 2. 下载 libnftnl Fullcone 表达式支持 (LEDE版本)
         echo "下载 libnftnl Fullcone 表达式支持..."
@@ -298,7 +298,7 @@ jobs:
         
         echo "Fullcone NAT 组件状态:"
         components=(
-          "target/linux/generic/hack-6.6/982-add-bcm-fullconenat-support.patch"
+          "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch"
           "package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch"
           "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch"
           "package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch"
