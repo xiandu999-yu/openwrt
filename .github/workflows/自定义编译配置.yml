@@ -2,12 +2,12 @@ name: 自定义编译配置
 
 on:
   schedule:
-    - cron: '0 4 * * *'  # 每天UTC时间4点编译
+    - cron: '0 4 * * *'
   push:
     branches: [ main ]
   workflow_dispatch:
     inputs:
-      target_device:  # 目标设备
+      target_device:
         description: '选择编译目标设备'
         required: true
         default: 'nanopi-r3s'
@@ -15,39 +15,39 @@ on:
         options:
           - nanopi-r3s
           - nanopi-r6s
-      include_sfe:  # 包含SFE加速
+      include_sfe:
         description: '是否包含Shortcut FE加速'
         type: boolean
         required: false
         default: true
-      compile_threads:  # 编译线程数
-        description: '选择编译线程数 (单线程更稳定，多线程更快)'
+      compile_threads:
+        description: '选择编译线程数'
         required: false
         default: 'single'
         type: choice
         options:
           - single
           - multi
-      build_mode:  # 编译模式
-        description: '选择编译模式 (firmware=全kmods+固件, full=全kmods+固件+全插件)'
+      build_mode:
+        description: '选择编译模式'
         required: false
         default: 'firmware'
         type: choice
         options:
           - firmware
           - full
-      include_istore:  # 包含iStore
+      include_istore:
         description: '是否包含iStore相关功能'
         type: boolean
         required: false
         default: true
-      turboacc_method:  # TurboACC加速方案
-        description: '选择TurboACC加速方案 (lede=完整LEDE方案, script=脚本方案)'
+      turboacc_method:
+        description: '选择TurboACC加速方案'
         required: false
-        default: 'script'
+        default: 'immortalwrt'
         type: choice
         options:
-          - lede
+          - immortalwrt
           - script
 
 env:
@@ -79,484 +79,78 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-openwrt-
 
-    - name: 安装系统依赖 (LEDE推荐)
+    - name: 安装系统依赖
       run: |
-        echo "=== 安装LEDE推荐的完整编译依赖 ==="
         sudo apt update -y
         sudo apt full-upgrade -y
-        sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential \
-        bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gcc-multilib g++-multilib gettext \
-        genisoimage git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev \
-        libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev \
-        libreadline-dev libssl-dev libtool llvm lrzsz libnsl-dev ninja-build p7zip p7zip-full patch pkgconf \
-        python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion \
-        swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
+        sudo apt install -y ack antlr3 asciidoc autoconf automake autopoint binutils bison build-essential bzip2 ccache clang cmake cpio curl device-tree-compiler flex gawk gcc-multilib g++-multilib gettext genisoimage git gperf haveged help2man intltool libc6-dev-i386 libelf-dev libfuse-dev libglib2.0-dev libgmp3-dev libltdl-dev libmpc-dev libmpfr-dev libncurses5-dev libncursesw5-dev libpython3-dev libreadline-dev libssl-dev libtool llvm lrzsz libnsl-dev ninja-build p7zip p7zip-full patch pkgconf python3 python3-pyelftools python3-setuptools qemu-utils rsync scons squashfs-tools subversion swig texinfo uglifyjs upx-ucl unzip vim wget xmlto xxd zlib1g-dev
 
-    - name: 检查系统信息
+    - name: 配置环境
       run: |
-        echo "=== 环境信息 ==="
         echo "设备: ${{ github.event.inputs.target_device }}"
         echo "线程: ${{ github.event.inputs.compile_threads }}"
-        echo "模式: ${{ github.event.inputs.build_mode }}"
-        echo "iStore: ${{ github.event.inputs.include_istore }}"
-        echo "SFE: ${{ github.event.inputs.include_sfe }}"
         echo "TurboACC方案: ${{ github.event.inputs.turboacc_method }}"
-        echo "CPU: $(nproc) 核心"
-        echo "内存: $(free -h | grep Mem | awk '{print $2}')"
-        echo "系统: $(lsb_release -d | cut -f2)"
-        echo ""
+        nproc
 
-    - name: 配置 feeds 源
+    - name: 配置 feeds
       run: |
-        echo "配置 feeds 源..."
         cat > feeds.conf << 'EOF'
         src-git packages https://github.com/openwrt/packages.git
         src-git luci https://github.com/openwrt/luci.git
         src-git routing https://github.com/openwrt/routing.git
         src-git telephony https://github.com/openwrt/telephony.git
         EOF
-
-    - name: 更新和安装 feeds
-      run: |
-        echo "更新 feeds..."
         ./scripts/feeds update -a
-        echo "安装 feeds..."
         ./scripts/feeds install -a
 
-    - name: 应用TurboACC加速方案
-      run: |
-        echo "=== 应用TurboACC加速方案 ==="
-        
-        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
-          echo "使用脚本方案安装TurboACC..."
-          
-          # 下载并执行TurboACC安装脚本
-          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-            echo "安装完整TurboACC (包含SFE)"
-            curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
-            bash add_turboacc.sh
-          else
-            echo "安装TurboACC (不包含SFE)"
-            curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
-            bash add_turboacc.sh --no-sfe
-          fi
-          
-          echo "✅ TurboACC脚本方案应用完成"
-          
-        else
-          echo "使用完整LEDE Fullcone NAT方案..."
-          
-          # 创建补丁目录结构
-          mkdir -p target/linux/generic/hack-6.12
-          mkdir -p package/libs/libnftnl/patches
-          mkdir -p package/network/utils/nftables/patches
-          mkdir -p package/network/config/firewall4/patches
-          mkdir -p package/network/config/firewall/patches
-          mkdir -p package/network/utils/iptables/patches
-          mkdir -p package/network/services/fullconenat-nft
-          mkdir -p package/network/services/fullconenat/src
-          
-          # 设置重试机制和错误处理
-          download_with_retry() {
-            local url=$1
-            local output=$2
-            local retries=3
-            local timeout=30
-            
-            for i in $(seq 1 $retries); do
-              echo "下载尝试 $i: $output"
-              if curl -f --connect-timeout $timeout -sSL "$url" -o "$output"; then
-                echo "✅ 下载成功: $(basename $output)"
-                return 0
-              else
-                echo "❌ 下载失败 $i: $(basename $output)"
-                sleep 2
-              fi
-            done
-            echo "⚠️ 跳过: $(basename $output)"
-            return 1
-          }
-          
-          # 1. 下载 BCM Fullcone NAT 内核补丁
-          echo "下载 BCM Fullcone NAT 内核补丁..."
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/generic/hack-6.6/982-add-bcm-fullconenat-support.patch" \
-            "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch"
-          
-          # 2. 下载 libnftnl Fullcone 表达式支持
-          echo "下载 libnftnl Fullcone 表达式支持..."
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch" \
-            "package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch"
-          
-          # 3. 下载 nftables Fullcone 表达式支持
-          echo "下载 nftables Fullcone 表达式支持..."
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch" \
-            "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch"
-          
-          # 4. 下载 firewall4 Fullcone 支持
-          echo "下载 firewall4 Fullcone 支持..."
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch" \
-            "package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch"
-          
-          # 5. 下载传统 iptables Fullcone NAT 支持
-          echo "下载传统 iptables Fullcone NAT 支持..."
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/iptables/patches/900-bcm-fullconenat.patch" \
-            "package/network/utils/iptables/patches/900-bcm-fullconenat.patch"
-          
-          # 6. 下载传统 firewall3 Fullcone 支持
-          echo "下载传统 firewall3 Fullcone 支持..."
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/100-fullconenat.patch" \
-            "package/network/config/firewall/patches/100-fullconenat.patch"
-          
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/101-bcm-fullconenat.patch" \
-            "package/network/config/firewall/patches/101-bcm-fullconenat.patch"
-          
-          # 7. 下载 nftables Fullcone 内核模块
-          echo "下载 nftables Fullcone 内核模块..."
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat-nft/Makefile" \
-            "package/network/services/fullconenat-nft/Makefile"
-          
-          # 8. 下载传统 iptables Fullcone 内核模块
-          echo "下载传统 iptables Fullcone 内核模块..."
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/Makefile" \
-            "package/network/services/fullconenat/Makefile"
-          
-          download_with_retry \
-            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/src/Makefile" \
-            "package/network/services/fullconenat/src/Makefile"
-          
-          echo "✅ 完整LEDE Fullcone NAT方案应用完成"
-        fi
+    - name: 修复 nftables 问题
+      run: bash scripts/fix-nftables-issue.sh ${{ github.event.inputs.turboacc_method }}
+
+    - name: 应用 TurboACC 方案
+      run: bash scripts/apply-turboacc.sh ${{ github.event.inputs.turboacc_method }} ${{ github.event.inputs.include_sfe }}
 
     - name: 运行 prereq 检查
-      run: |
-        echo "=== 运行 prereq 依赖检查 ==="
-        make prereq
-        echo "✅ prereq 检查通过"
+      run: make prereq
 
     - name: 应用基础配置
       run: |
-        echo "=== 应用基础设备配置 ==="
         if [ "${{ github.event.inputs.target_device }}" = "nanopi-r3s" ]; then
           cp configs/nanopi-r3s.config .config
-          echo "选择 NanoPi R3S 配置"
         else
           cp configs/nanopi-r6s.config .config
-          echo "选择 NanoPi R6S 配置"
         fi
-        
-        # 应用基础配置
         make defconfig
-        echo "✅ 基础配置完成"
 
-    - name: 配置TurboACC功能
-      run: |
-        echo "=== 配置TurboACC功能 ==="
-        
-        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
-          echo "配置脚本方案的TurboACC..."
-          
-          # 启用TurboACC相关包
-          echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
-          
-          # 根据SFE选择配置
-          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-            echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
-            echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
-            echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=y" >> .config
-          fi
-          
-        else
-          echo "配置完整LEDE方案的Fullcone NAT..."
-          
-          # 启用全内核模块
-          echo "CONFIG_ALL_KMODS=y" >> .config
-          
-          # 基础系统配置
-          echo "CONFIG_USE_APK=y" >> .config
-          
-          # 禁用有问题的包
-          echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
-          echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
-          echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
-          
-          # Fullcone NAT - 完整 LEDE 方案
-          echo "CONFIG_PACKAGE_firewall4=y" >> .config
-          echo "CONFIG_PACKAGE_nftables-json=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
-          echo "CONFIG_PACKAGE_iptables-mod-fullconenat=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-ipt-fullconenat=y" >> .config
-          
-          # 启用 BCM Fullcone 支持
-          echo "CONFIG_PACKAGE_kmod-nft-nat=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-nf-conntrack=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-nf-nat=y" >> .config
-          
-          # Shortcut FE配置
-          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-            echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
-            echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
-            echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=y" >> .config
-          fi
-        fi
-        
-        # 根据编译模式配置
-        if [ "${{ github.event.inputs.build_mode }}" = "full" ]; then
-          echo "CONFIG_PACKAGE_bash=y" >> .config
-          echo "CONFIG_PACKAGE_htop=y" >> .config
-          echo "CONFIG_PACKAGE_nano=y" >> .config
-          echo "CONFIG_PACKAGE_vim=y" >> .config
-          echo "CONFIG_PACKAGE_curl=y" >> .config
-        fi
-        
-        # iStore配置
-        if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
-          echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-store=y" >> .config
-          echo "CONFIG_PACKAGE_luci-app-quickstart=y" >> .config
-        fi
-        
-        # 重新应用配置
-        make defconfig
-        echo "✅ TurboACC配置完成"
-
-    - name: 启用必需的内核模块
-      run: |
-        echo "=== 启用必需的内核模块 ==="
-        
-        # 网络核心模块
-        echo "CONFIG_PACKAGE_kmod-ppp=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-pppoe=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-nf-nat=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-ipt-core=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-ipv6=y" >> .config
-        
-        # Fullcone NAT 依赖模块
-        echo "CONFIG_PACKAGE_kmod-nf-conntrack=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-nf-conntrack-netlink=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-nf-nat=y" >> .config
-        
-        # 文件系统
-        echo "CONFIG_PACKAGE_kmod-fs-ext4=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-squashfs=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-fs-vfat=y" >> .config
-        
-        # USB支持
-        echo "CONFIG_PACKAGE_kmod-usb-core=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb-storage=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb2=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-usb3=y" >> .config
-        
-        # 加密
-        echo "CONFIG_PACKAGE_kmod-crypto-core=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-crypto-hash=y" >> .config
-        
-        # 其他核心模块
-        echo "CONFIG_PACKAGE_kmod-nls-base=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-nls-utf8=y" >> .config
-        
-        # 应用配置
-        make oldconfig
-        echo "✅ 内核模块配置完成"
-
-    - name: 验证TurboACC配置
-      run: |
-        echo "=== 验证TurboACC配置 ==="
-        
-        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
-          echo "🎯 TurboACC脚本方案配置:"
-          echo "  - luci-app-turboacc Web界面"
-          echo "  - nft-fullcone 内核模块"
-          
-          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-            echo "  - Shortcut FE 加速"
-            echo "  - 自动替换firewall4、libnftnl、nftables"
-            echo "  - 应用952、613、953补丁"
-          else
-            echo "  - 无 SFE 加速"
-            echo "  - 自动替换firewall4、libnftnl、nftables"  
-            echo "  - 应用952补丁"
-          fi
-          
-        else
-          echo "🎯 完整LEDE Fullcone NAT方案配置:"
-          echo "  - BCM Fullcone NAT 内核补丁 (最高性能)"
-          echo "  - nftables fullcone 独立表达式"
-          echo "  - iptables FULLCONENAT 传统目标"
-          echo "  - 双重防火墙支持 (firewall3 + firewall4)"
-          echo "  - 完整内核模块生态"
-          
-          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-            echo "  - Shortcut FE 加速"
-          else
-            echo "  - 无 SFE 加速"
-          fi
-        fi
-        
-        echo ""
-        echo "TurboACC组件状态:"
-        echo "luci-app-turboacc: $(grep "CONFIG_PACKAGE_luci-app-turboacc" .config || echo "未配置")"
-        echo "nft-fullcone: $(grep "CONFIG_PACKAGE_kmod-nft-fullcone" .config || echo "未配置")"
-        
-        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-          echo "Shortcut FE: $(grep "CONFIG_PACKAGE_kmod-shortcut-fe" .config || echo "未配置")"
-        fi
-
-    - name: 修复常见问题
-      run: |
-        echo "=== 修复常见编译问题 ==="
-        
-        # 清理有问题的包
-        rm -rf feeds/telephony/net/rtpengine 2>/dev/null || true
-        
-        # 修复可能的依赖问题
-        if [ -d "package/qca/shortcut-fe" ]; then
-          echo "修复 Shortcut FE 配置..."
-          find package/qca/shortcut-fe -name "*.mk" -exec sed -i 's/kmod-shortcut-fe-cm/kmod-shortcut-fe/g' {} \; 2>/dev/null || true
-        fi
-
-    - name: 生成版本信息
-      run: |
-        echo "=== 生成版本信息 ==="
-        {
-          echo "固件版本: OpenWrt SNAPSHOT"
-          echo "内核版本: 6.12 (带 Fullcone NAT 补丁)"
-          echo "编译时间: $(date '+%Y-%m-%d %H:%M:%S')"
-          echo "目标设备: ${{ github.event.inputs.target_device }}"
-          echo "编译模式: ${{ github.event.inputs.build_mode }}"
-          echo "TurboACC方案: ${{ github.event.inputs.turboacc_method }}"
-          echo ""
-          
-          if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
-            echo "🎯 TurboACC脚本方案特性:"
-            echo "  - luci-app-turboacc Web管理界面"
-            echo "  - nft-fullcone Fullcone NAT支持"
-            if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-              echo "  - Shortcut FE 网络加速"
-              echo "  - 自动组件替换和补丁应用"
-            fi
-          else
-            echo "🎯 完整LEDE Fullcone NAT方案特性:"
-            echo "  - BCM Fullcone NAT 内核补丁"
-            echo "  - nftables fullcone 表达式"
-            echo "  - iptables FULLCONENAT 目标"
-            echo "  - 双重防火墙支持"
-            if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-              echo "  - Shortcut FE 网络加速"
-            fi
-          fi
-          
-          echo ""
-          echo "包含功能:"
-          echo "  - 全内核模块支持"
-          
-          if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
-            echo "  - iStore 应用商店"
-          else
-            echo "  - 无 iStore"
-          fi
-          
-          echo "Git提交: $(git log -1 --format=%h)"
-        } > version-info.txt
-        
-        cat version-info.txt
+    - name: 配置防火墙功能
+      run: bash scripts/configure-firewall.sh ${{ github.event.inputs.turboacc_method }} ${{ github.event.inputs.include_sfe }} ${{ github.event.inputs.build_mode }} ${{ github.event.inputs.include_istore }}
 
     - name: 编译固件
       run: |
-        echo "=== 开始编译 ==="
-        
-        # 设置线程数
         if [ "${{ github.event.inputs.compile_threads }}" = "multi" ]; then
           THREADS=$(nproc)
-          echo "使用多线程模式: $THREADS 个CPU核心"
         else
           THREADS=1
-          echo "使用单线程模式: 1 个CPU核心 (系统有 $(nproc) 个核心)"
         fi
-        
-        # 设置环境变量
         export FORCE_UNSAFE_CONFIGURE=1
-        
-        echo "开始完整编译..."
-        set +e  # 禁用错误退出
-        if [ "$THREADS" -eq 1 ]; then
-          make -j1 V=s 2>&1 | tee build.log
-          COMPILE_RESULT=${PIPESTATUS[0]}
-        else
-          make -j$THREADS V=s 2>&1 | tee build.log
-          COMPILE_RESULT=${PIPESTATUS[0]}
-        fi
-        set -e  # 重新启用错误退出
-        
-        # 检查编译结果
-        if [ -d "bin/targets" ] && [ $(find bin/targets/ -name "*.bin" -o -name "*.img" 2>/dev/null | wc -l) -gt 0 ]; then
-          echo "✅ 固件文件已生成，编译成功"
-          exit 0
-        elif [ -d "bin/packages" ] && [ $(find bin/packages/ -name "*.apk" 2>/dev/null | wc -l) -gt 0 ]; then
-          echo "⚠️ 只有软件包生成，编译部分成功"
-          exit 0
-        elif [ $COMPILE_RESULT -eq 0 ]; then
-          echo "✅ 编译过程完成（无错误）"
-          exit 0
-        else
-          echo "❌ 编译失败"
-          exit $COMPILE_RESULT
-        fi
+        make -j$THREADS V=s
 
-    - name: 收集构建产物
+    - name: 收集产物
       if: always()
       run: |
-        echo "=== 收集构建产物 ==="
-        mkdir -p upload/firmware upload/packages upload/logs
-        
-        # 收集固件
+        mkdir -p upload/firmware upload/packages
         find bin/targets -type f \( -name "*.bin" -o -name "*.img" -o -name "*.gz" \) -exec cp --parents {} upload/firmware/ \; 2>/dev/null || true
-        
-        # 收集软件包
-        if [ -d "bin/packages" ]; then
-          cp -r bin/packages/* upload/packages/ 2>/dev/null || true
-        fi
-        
-        # 收集日志和配置
-        cp version-info.txt upload/ 2>/dev/null || true
-        cp .config upload/ 2>/dev/null || true
-        cp build.log upload/logs/ 2>/dev/null || true
-        
-        echo "产物统计:"
-        echo "固件文件: $(find upload/firmware -type f 2>/dev/null | wc -l || echo 0) 个"
-        echo "软件包: $(find upload/packages -name "*.apk" 2>/dev/null | wc -l || echo 0) 个"
-        find upload/firmware -type f 2>/dev/null | head -10 || echo "无固件文件"
+        [ -d "bin/packages" ] && cp -r bin/packages/* upload/packages/ 2>/dev/null || true
 
     - name: 上传固件
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}-${{ github.event.inputs.turboacc_method }}
+        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_method }}
         path: upload/firmware/
-        retention-days: 30
         if-no-files-found: warn
 
     - name: 上传软件包
       uses: actions/upload-artifact@v4
       with:
-        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}-${{ github.event.inputs.turboacc_method }}
+        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.turboacc_method }}
         path: upload/packages/
-        retention-days: 30
-        if-no-files-found: warn
-
-    - name: 上传构建信息
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}-${{ github.event.inputs.turboacc_method }}
-        path: upload/
-        retention-days: 7
         if-no-files-found: warn
