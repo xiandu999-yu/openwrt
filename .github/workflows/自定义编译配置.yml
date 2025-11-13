@@ -119,65 +119,110 @@ jobs:
         echo "=== 下载并应用完整的 LEDE Fullcone NAT 方案 ==="
         
         # 创建补丁目录结构
-        mkdir -p target/linux/generic/hack-6.6
+        mkdir -p target/linux/generic/hack-6.12
         mkdir -p package/libs/libnftnl/patches
         mkdir -p package/network/utils/nftables/patches
         mkdir -p package/network/config/firewall4/patches
         mkdir -p package/network/config/firewall/patches
         mkdir -p package/network/utils/iptables/patches
         mkdir -p package/network/services/fullconenat-nft
-        mkdir -p package/network/services/fullconenat
+        mkdir -p package/network/services/fullconenat/src
         
-        # 1. 下载 BCM Fullcone NAT 内核补丁 (6.6内核)
+        # 设置重试机制和错误处理
+        download_with_retry() {
+          local url=$1
+          local output=$2
+          local retries=3
+          local timeout=30
+          
+          for i in $(seq 1 $retries); do
+            echo "下载尝试 $i: $output"
+            if curl -f --connect-timeout $timeout -sSL "$url" -o "$output"; then
+              echo "✅ 下载成功: $(basename $output)"
+              return 0
+            else
+              echo "❌ 下载失败 $i: $(basename $output)"
+              sleep 2
+            fi
+          done
+          echo "⚠️ 跳过: $(basename $output)"
+          return 1
+        }
+        
+        # 1. 下载 BCM Fullcone NAT 内核补丁
         echo "下载 BCM Fullcone NAT 内核补丁..."
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/generic/hack-6.6/982-add-bcm-fullconenat-support.patch \
-          -o target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/generic/hack-6.6/982-add-bcm-fullconenat-support.patch" \
+          "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch"
         
-        # 2. 下载 libnftnl Fullcone 表达式支持 (LEDE版本)
+        # 2. 下载 libnftnl Fullcone 表达式支持
         echo "下载 libnftnl Fullcone 表达式支持..."
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch \
-          -o package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch" \
+          "package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch"
         
-        # 3. 下载 nftables Fullcone 表达式支持 (LEDE版本)
+        # 3. 下载 nftables Fullcone 表达式支持
         echo "下载 nftables Fullcone 表达式支持..."
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch \
-          -o package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch" \
+          "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch"
         
-        # 4. 下载 firewall4 Fullcone 支持 (LEDE版本)
+        # 4. 下载 firewall4 Fullcone 支持
         echo "下载 firewall4 Fullcone 支持..."
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch \
-          -o package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch" \
+          "package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch"
         
         # 5. 下载传统 iptables Fullcone NAT 支持
         echo "下载传统 iptables Fullcone NAT 支持..."
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/iptables/patches/900-bcm-fullconenat.patch \
-          -o package/network/utils/iptables/patches/900-bcm-fullconenat.patch
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/iptables/patches/900-bcm-fullconenat.patch" \
+          "package/network/utils/iptables/patches/900-bcm-fullconenat.patch"
         
         # 6. 下载传统 firewall3 Fullcone 支持
         echo "下载传统 firewall3 Fullcone 支持..."
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/100-fullconenat.patch \
-          -o package/network/config/firewall/patches/100-fullconenat.patch
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/101-bcm-fullconenat.patch \
-          -o package/network/config/firewall/patches/101-bcm-fullconenat.patch
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/100-fullconenat.patch" \
+          "package/network/config/firewall/patches/100-fullconenat.patch"
+        
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/101-bcm-fullconenat.patch" \
+          "package/network/config/firewall/patches/101-bcm-fullconenat.patch"
         
         # 7. 下载 nftables Fullcone 内核模块
         echo "下载 nftables Fullcone 内核模块..."
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat-nft/Makefile \
-          -o package/network/services/fullconenat-nft/Makefile
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat-nft/Makefile" \
+          "package/network/services/fullconenat-nft/Makefile"
         
         # 8. 下载传统 iptables Fullcone 内核模块
         echo "下载传统 iptables Fullcone 内核模块..."
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/Makefile \
-          -o package/network/services/fullconenat/Makefile
-        curl -sSL https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/src/Makefile \
-          -o package/network/services/fullconenat/src/Makefile
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/Makefile" \
+          "package/network/services/fullconenat/Makefile"
         
-        echo "✅ 完整的 LEDE Fullcone NAT 方案下载完成"
+        download_with_retry \
+          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/src/Makefile" \
+          "package/network/services/fullconenat/src/Makefile"
         
-        # 验证下载的文件
-        echo "=== 验证下载的补丁 ==="
-        find . -name "*fullcone*" -o -name "*fullconenat*" -type f 2>/dev/null | head -20
-
+        echo "✅ Fullcone NAT 组件下载完成"
+        
+        # 验证关键文件
+        echo "=== 验证关键文件 ==="
+        critical_files=(
+          "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch"
+          "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch"
+          "package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch"
+        )
+        
+        for file in "${critical_files[@]}"; do
+          if [ -f "$file" ]; then
+            echo "✅ 关键文件存在: $(basename $file)"
+          else
+            echo "❌ 关键文件缺失: $(basename $file)"
+          fi
+        done
+        
     - name: 运行 prereq 检查
       run: |
         echo "=== 运行 prereq 依赖检查 ==="
