@@ -1,4 +1,4 @@
-name: OpenWrt 编译（彻底修复终端问题）
+name: OpenWrt 编译（修复 prereq 问题）
 
 on:
   push:
@@ -22,37 +22,6 @@ on:
           - immortalwrt
           - hybrid
           - script
-      enable_turboacc_ui:
-        description: '启用TurboACC Web界面'
-        type: boolean
-        required: false
-        default: true
-      include_sfe:
-        description: '包含SFE加速'
-        type: boolean
-        required: false
-        default: true
-      include_istore:
-        description: '包含iStore应用商店'
-        type: boolean
-        required: false
-        default: false
-      compile_threads:
-        description: '编译线程数'
-        required: false
-        default: 'single'
-        type: choice
-        options:
-          - single
-          - multi
-      build_mode:
-        description: '编译模式'
-        required: false
-        default: 'firmware'
-        type: choice
-        options:
-          - firmware
-          - full
 
 env:
   TIMEOUT: 360m
@@ -79,11 +48,25 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-openwrt-
 
-    - name: 安装完整编译环境
+    - name: 安装编译环境
       run: |
         echo "=== 安装编译环境 ==="
         sudo apt update -y
-        sudo apt install -y build-essential ccache curl file g++ gawk gettext git libncurses5-dev libssl-dev make python3 rsync unzip
+        sudo apt install -y \
+          build-essential \
+          ccache \
+          curl \
+          file \
+          g++ \
+          gawk \
+          gettext \
+          git \
+          libncurses5-dev \
+          libssl-dev \
+          make \
+          python3 \
+          rsync \
+          unzip
         sudo apt clean
 
     - name: 配置 feeds
@@ -100,114 +83,67 @@ jobs:
       run: |
         echo "=== 修复 nftables ==="
         rm -f package/network/utils/nftables/patches/001-fix-pppox-includes.patch 2>/dev/null || true
-        rm -rf build_dir/target-*/nftables-* 2>/dev/null || true
 
-    - name: 创建基础配置（非交互式）
+    - name: 运行非交互式依赖检查
+      run: bash scripts/check-prereq.sh
+
+    - name: 创建设备配置
       run: |
+        echo "=== 创建设备配置 ==="
         bash scripts/create-base-config.sh "${{ github.event.inputs.target_device }}"
 
-    - name: 应用功能配置（非交互式）
+    - name: 应用功能配置
       run: |
         echo "=== 应用功能配置 ==="
         
-        # 设置环境变量
         export FORCE_UNSAFE_CONFIGURE=1
         
-        # 基础配置验证
-        if [ ! -f ".config" ]; then
-          echo "❌ 配置文件不存在，创建基础配置"
-          make defconfig
-        fi
-        
         # 应用 TurboACC 配置
-        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
-          echo "应用脚本方案..."
-          curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
-          chmod +x add_turboacc.sh
-          bash add_turboacc.sh
-        else
-          echo "应用标准方案..."
-          # 手动添加配置
-          echo "CONFIG_PACKAGE_firewall4=y" >> .config
-          echo "CONFIG_PACKAGE_nftables-json=y" >> .config
-          
-          if [ "${{ github.event.inputs.enable_turboacc_ui }}" = "true" ]; then
+        case "${{ github.event.inputs.turboacc_method }}" in
+          "script")
+            echo "应用脚本方案..."
+            curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+            chmod +x add_turboacc.sh
+            bash add_turboacc.sh --no-sfe  # 先不加 SFE 确保基础编译
+            ;;
+          *)
+            echo "应用标准方案..."
+            echo "CONFIG_PACKAGE_firewall4=y" >> .config
+            echo "CONFIG_PACKAGE_nftables-json=y" >> .config
             echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
-          fi
-          
-          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-            echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
-          fi
-          
-          if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
-            echo "CONFIG_PACKAGE_luci-app-istorex=y" >> .config
-          fi
-        fi
+            ;;
+        esac
         
-        # 最终配置验证（非交互式）
-        echo "运行最终配置验证..."
+        # 非交互式配置验证
+        echo "运行 defconfig..."
         make defconfig
 
-    - name: 编译前检查
-      run: |
-        echo "=== 编译前检查 ==="
-        echo "磁盘空间:"
-        df -h
-        echo "配置文件状态:"
-        ls -la .config
-        echo "关键配置:"
-        grep -E "CONFIG_TARGET|CONFIG_PACKAGE" .config | head -10
-
-    - name: 编译固件（简化输出）
+    - name: 编译固件
       run: |
         echo "=== 开始编译 ==="
         
         export FORCE_UNSAFE_CONFIGURE=1
         export CCACHE_DIR="/tmp/ccache"
         
-        # 单线程编译确保稳定性
-        THREADS=1
-        echo "使用单线程编译: $THREADS"
-        
-        echo "编译开始: $(date)"
-        
-        # 简化编译输出，只显示错误和警告
-        make -j$THREADS 2>&1 | grep -E "(error|warning|Error|Warning|FAILED)" || true
-        
-        echo "编译结束: $(date)"
+        # 单线程编译确保成功
+        echo "使用单线程编译..."
+        make -j1 V=s 2>&1 | tail -100
 
     - name: 检查编译结果
-      if: always()
       run: |
-        echo "=== 编译结果检查 ==="
-        
-        # 检查基础目录结构
-        if [ -d "bin" ]; then
-          echo "✅ bin 目录存在"
-          find bin -type f -name "*.bin" -o -name "*.img" | head -5 || echo "⚠️ 无固件文件"
+        echo "=== 编译结果 ==="
+        if find bin -name "*.bin" -o -name "*.img" 2>/dev/null | grep -q .; then
+          echo "✅ 编译成功!"
+          find bin -name "*.bin" -o -name "*.img" | head -5
         else
-          echo "❌ bin 目录不存在，编译失败"
-          # 显示可能的错误
-          find . -name "*.log" -type f | head -3 | xargs tail -50 2>/dev/null || echo "无日志文件"
+          echo "❌ 编译失败"
           exit 1
         fi
 
-    - name: 收集产物
-      if: success()
-      run: |
-        echo "=== 收集产物 ==="
-        mkdir -p upload/firmware
-        
-        # 收集固件
-        find bin -name "*.bin" -o -name "*.img" | head -3 | xargs -I {} cp {} upload/firmware/ 2>/dev/null || true
-        
-        echo "收集的固件:"
-        ls -la upload/firmware/ 2>/dev/null || echo "无固件文件"
-
-    - name: 上传固件
+    - name: 上传产物
       uses: actions/upload-artifact@v4
       with:
         name: openwrt-${{ github.event.inputs.target_device }}
-        path: upload/
+        path: bin/
         retention-days: 3
-        if-no-files-found: warn
+        if-no-files-found: error
