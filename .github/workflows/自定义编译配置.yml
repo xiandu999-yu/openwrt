@@ -83,13 +83,8 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-openwrt-
 
-    - name: 安装系统依赖（最小化）
-      run: |
-        echo "=== 安装最小化系统依赖 ==="
-        sudo apt update -y
-        # 只安装核心编译依赖
-        sudo apt install -y build-essential ccache curl file g++ gawk gettext git libncurses5-dev libssl-dev python3 python3-distutils rsync unzip zlib1g-dev
-        sudo apt clean
+    - name: 安装系统依赖（完整版）
+      run: bash scripts/install-dependencies.sh full
 
     - name: 配置 feeds
       run: |
