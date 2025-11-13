@@ -41,6 +41,14 @@ on:
         type: boolean
         required: false
         default: true
+      turboacc_method:  # TurboACC加速方案
+        description: '选择TurboACC加速方案 (lede=完整LEDE方案, script=脚本方案)'
+        required: false
+        default: 'script'
+        type: choice
+        options:
+          - lede
+          - script
 
 env:
   TIMEOUT: 360m
@@ -92,6 +100,7 @@ jobs:
         echo "模式: ${{ github.event.inputs.build_mode }}"
         echo "iStore: ${{ github.event.inputs.include_istore }}"
         echo "SFE: ${{ github.event.inputs.include_sfe }}"
+        echo "TurboACC方案: ${{ github.event.inputs.turboacc_method }}"
         echo "CPU: $(nproc) 核心"
         echo "内存: $(free -h | grep Mem | awk '{print $2}')"
         echo "系统: $(lsb_release -d | cut -f2)"
@@ -114,115 +123,119 @@ jobs:
         echo "安装 feeds..."
         ./scripts/feeds install -a
 
-    - name: 下载并应用完整的 LEDE Fullcone NAT 方案
+    - name: 应用TurboACC加速方案
       run: |
-        echo "=== 下载并应用完整的 LEDE Fullcone NAT 方案 ==="
+        echo "=== 应用TurboACC加速方案 ==="
         
-        # 创建补丁目录结构
-        mkdir -p target/linux/generic/hack-6.12
-        mkdir -p package/libs/libnftnl/patches
-        mkdir -p package/network/utils/nftables/patches
-        mkdir -p package/network/config/firewall4/patches
-        mkdir -p package/network/config/firewall/patches
-        mkdir -p package/network/utils/iptables/patches
-        mkdir -p package/network/services/fullconenat-nft
-        mkdir -p package/network/services/fullconenat/src
-        
-        # 设置重试机制和错误处理
-        download_with_retry() {
-          local url=$1
-          local output=$2
-          local retries=3
-          local timeout=30
+        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
+          echo "使用脚本方案安装TurboACC..."
           
-          for i in $(seq 1 $retries); do
-            echo "下载尝试 $i: $output"
-            if curl -f --connect-timeout $timeout -sSL "$url" -o "$output"; then
-              echo "✅ 下载成功: $(basename $output)"
-              return 0
-            else
-              echo "❌ 下载失败 $i: $(basename $output)"
-              sleep 2
-            fi
-          done
-          echo "⚠️ 跳过: $(basename $output)"
-          return 1
-        }
-        
-        # 1. 下载 BCM Fullcone NAT 内核补丁
-        echo "下载 BCM Fullcone NAT 内核补丁..."
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/generic/hack-6.6/982-add-bcm-fullconenat-support.patch" \
-          "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch"
-        
-        # 2. 下载 libnftnl Fullcone 表达式支持
-        echo "下载 libnftnl Fullcone 表达式支持..."
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch" \
-          "package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch"
-        
-        # 3. 下载 nftables Fullcone 表达式支持
-        echo "下载 nftables Fullcone 表达式支持..."
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch" \
-          "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch"
-        
-        # 4. 下载 firewall4 Fullcone 支持
-        echo "下载 firewall4 Fullcone 支持..."
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch" \
-          "package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch"
-        
-        # 5. 下载传统 iptables Fullcone NAT 支持
-        echo "下载传统 iptables Fullcone NAT 支持..."
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/iptables/patches/900-bcm-fullconenat.patch" \
-          "package/network/utils/iptables/patches/900-bcm-fullconenat.patch"
-        
-        # 6. 下载传统 firewall3 Fullcone 支持
-        echo "下载传统 firewall3 Fullcone 支持..."
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/100-fullconenat.patch" \
-          "package/network/config/firewall/patches/100-fullconenat.patch"
-        
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/101-bcm-fullconenat.patch" \
-          "package/network/config/firewall/patches/101-bcm-fullconenat.patch"
-        
-        # 7. 下载 nftables Fullcone 内核模块
-        echo "下载 nftables Fullcone 内核模块..."
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat-nft/Makefile" \
-          "package/network/services/fullconenat-nft/Makefile"
-        
-        # 8. 下载传统 iptables Fullcone 内核模块
-        echo "下载传统 iptables Fullcone 内核模块..."
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/Makefile" \
-          "package/network/services/fullconenat/Makefile"
-        
-        download_with_retry \
-          "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/src/Makefile" \
-          "package/network/services/fullconenat/src/Makefile"
-        
-        echo "✅ Fullcone NAT 组件下载完成"
-        
-        # 验证关键文件
-        echo "=== 验证关键文件 ==="
-        critical_files=(
-          "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch"
-          "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch"
-          "package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch"
-        )
-        
-        for file in "${critical_files[@]}"; do
-          if [ -f "$file" ]; then
-            echo "✅ 关键文件存在: $(basename $file)"
+          # 下载并执行TurboACC安装脚本
+          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+            echo "安装完整TurboACC (包含SFE)"
+            curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+            bash add_turboacc.sh
           else
-            echo "❌ 关键文件缺失: $(basename $file)"
+            echo "安装TurboACC (不包含SFE)"
+            curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+            bash add_turboacc.sh --no-sfe
           fi
-        done
-        
+          
+          echo "✅ TurboACC脚本方案应用完成"
+          
+        else
+          echo "使用完整LEDE Fullcone NAT方案..."
+          
+          # 创建补丁目录结构
+          mkdir -p target/linux/generic/hack-6.12
+          mkdir -p package/libs/libnftnl/patches
+          mkdir -p package/network/utils/nftables/patches
+          mkdir -p package/network/config/firewall4/patches
+          mkdir -p package/network/config/firewall/patches
+          mkdir -p package/network/utils/iptables/patches
+          mkdir -p package/network/services/fullconenat-nft
+          mkdir -p package/network/services/fullconenat/src
+          
+          # 设置重试机制和错误处理
+          download_with_retry() {
+            local url=$1
+            local output=$2
+            local retries=3
+            local timeout=30
+            
+            for i in $(seq 1 $retries); do
+              echo "下载尝试 $i: $output"
+              if curl -f --connect-timeout $timeout -sSL "$url" -o "$output"; then
+                echo "✅ 下载成功: $(basename $output)"
+                return 0
+              else
+                echo "❌ 下载失败 $i: $(basename $output)"
+                sleep 2
+              fi
+            done
+            echo "⚠️ 跳过: $(basename $output)"
+            return 1
+          }
+          
+          # 1. 下载 BCM Fullcone NAT 内核补丁
+          echo "下载 BCM Fullcone NAT 内核补丁..."
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/target/linux/generic/hack-6.6/982-add-bcm-fullconenat-support.patch" \
+            "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch"
+          
+          # 2. 下载 libnftnl Fullcone 表达式支持
+          echo "下载 libnftnl Fullcone 表达式支持..."
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch" \
+            "package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch"
+          
+          # 3. 下载 nftables Fullcone 表达式支持
+          echo "下载 nftables Fullcone 表达式支持..."
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch" \
+            "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch"
+          
+          # 4. 下载 firewall4 Fullcone 支持
+          echo "下载 firewall4 Fullcone 支持..."
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch" \
+            "package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch"
+          
+          # 5. 下载传统 iptables Fullcone NAT 支持
+          echo "下载传统 iptables Fullcone NAT 支持..."
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/utils/iptables/patches/900-bcm-fullconenat.patch" \
+            "package/network/utils/iptables/patches/900-bcm-fullconenat.patch"
+          
+          # 6. 下载传统 firewall3 Fullcone 支持
+          echo "下载传统 firewall3 Fullcone 支持..."
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/100-fullconenat.patch" \
+            "package/network/config/firewall/patches/100-fullconenat.patch"
+          
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/config/firewall/patches/101-bcm-fullconenat.patch" \
+            "package/network/config/firewall/patches/101-bcm-fullconenat.patch"
+          
+          # 7. 下载 nftables Fullcone 内核模块
+          echo "下载 nftables Fullcone 内核模块..."
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat-nft/Makefile" \
+            "package/network/services/fullconenat-nft/Makefile"
+          
+          # 8. 下载传统 iptables Fullcone 内核模块
+          echo "下载传统 iptables Fullcone 内核模块..."
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/Makefile" \
+            "package/network/services/fullconenat/Makefile"
+          
+          download_with_retry \
+            "https://raw.githubusercontent.com/coolsnowwolf/lede/master/package/network/services/fullconenat/src/Makefile" \
+            "package/network/services/fullconenat/src/Makefile"
+          
+          echo "✅ 完整LEDE Fullcone NAT方案应用完成"
+        fi
+
     - name: 运行 prereq 检查
       run: |
         echo "=== 运行 prereq 依赖检查 ==="
@@ -244,38 +257,56 @@ jobs:
         make defconfig
         echo "✅ 基础配置完成"
 
-    - name: 配置完整的 Fullcone NAT 功能
+    - name: 配置TurboACC功能
       run: |
-        echo "=== 配置完整的 LEDE Fullcone NAT 功能 ==="
+        echo "=== 配置TurboACC功能 ==="
         
-        # 启用全内核模块
-        echo "CONFIG_ALL_KMODS=y" >> .config
-        
-        # 基础系统配置
-        echo "CONFIG_USE_APK=y" >> .config
-        
-        # 禁用有问题的包
-        echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
-        echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
-        echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
-        
-        # Fullcone NAT - 完整 LEDE 方案
-        echo "CONFIG_PACKAGE_firewall4=y" >> .config
-        echo "CONFIG_PACKAGE_nftables-json=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
-        echo "CONFIG_PACKAGE_iptables-mod-fullconenat=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-ipt-fullconenat=y" >> .config
-        
-        # 启用 BCM Fullcone 支持
-        echo "CONFIG_PACKAGE_kmod-nft-nat=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-nf-conntrack=y" >> .config
-        echo "CONFIG_PACKAGE_kmod-nf-nat=y" >> .config
-        
-        # Shortcut FE配置
-        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
-          echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=y" >> .config
+        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
+          echo "配置脚本方案的TurboACC..."
+          
+          # 启用TurboACC相关包
+          echo "CONFIG_PACKAGE_luci-app-turboacc=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
+          
+          # 根据SFE选择配置
+          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+            echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-shortcut-fe-cm=y" >> .config
+          fi
+          
+        else
+          echo "配置完整LEDE方案的Fullcone NAT..."
+          
+          # 启用全内核模块
+          echo "CONFIG_ALL_KMODS=y" >> .config
+          
+          # 基础系统配置
+          echo "CONFIG_USE_APK=y" >> .config
+          
+          # 禁用有问题的包
+          echo "# CONFIG_PACKAGE_rtpengine is not set" >> .config
+          echo "# CONFIG_PACKAGE_freeswitch is not set" >> .config
+          echo "# CONFIG_PACKAGE_asterisk is not set" >> .config
+          
+          # Fullcone NAT - 完整 LEDE 方案
+          echo "CONFIG_PACKAGE_firewall4=y" >> .config
+          echo "CONFIG_PACKAGE_nftables-json=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nft-fullcone=y" >> .config
+          echo "CONFIG_PACKAGE_iptables-mod-fullconenat=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-ipt-fullconenat=y" >> .config
+          
+          # 启用 BCM Fullcone 支持
+          echo "CONFIG_PACKAGE_kmod-nft-nat=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nf-conntrack=y" >> .config
+          echo "CONFIG_PACKAGE_kmod-nf-nat=y" >> .config
+          
+          # Shortcut FE配置
+          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+            echo "CONFIG_PACKAGE_kmod-shortcut-fe=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-fast-classifier=y" >> .config
+            echo "CONFIG_PACKAGE_kmod-shortcut-fe-drv=y" >> .config
+          fi
         fi
         
         # 根据编译模式配置
@@ -296,7 +327,7 @@ jobs:
         
         # 重新应用配置
         make defconfig
-        echo "✅ 完整的 Fullcone NAT 配置完成"
+        echo "✅ TurboACC配置完成"
 
     - name: 启用必需的内核模块
       run: |
@@ -337,45 +368,48 @@ jobs:
         make oldconfig
         echo "✅ 内核模块配置完成"
 
-    - name: 验证完整的 Fullcone NAT 配置
+    - name: 验证TurboACC配置
       run: |
-        echo "=== 验证完整的 LEDE Fullcone NAT 配置 ==="
+        echo "=== 验证TurboACC配置 ==="
         
-        echo "Fullcone NAT 组件状态:"
-        components=(
-          "target/linux/generic/hack-6.12/982-add-bcm-fullconenat-support.patch"
-          "package/libs/libnftnl/patches/001-libnftnl-add-fullcone-expression-support.patch"
-          "package/network/utils/nftables/patches/002-nftables-add-fullcone-expression-support.patch"
-          "package/network/config/firewall4/patches/001-firewall4-add-support-for-fullcone-nat.patch"
-          "package/network/utils/iptables/patches/900-bcm-fullconenat.patch"
-          "package/network/config/firewall/patches/100-fullconenat.patch"
-          "package/network/config/firewall/patches/101-bcm-fullconenat.patch"
-          "package/network/services/fullconenat-nft/Makefile"
-          "package/network/services/fullconenat/Makefile"
-        )
-        
-        for comp in "${components[@]}"; do
-          if [ -f "$comp" ]; then
-            echo "✅ $(basename $comp)"
+        if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
+          echo "🎯 TurboACC脚本方案配置:"
+          echo "  - luci-app-turboacc Web界面"
+          echo "  - nft-fullcone 内核模块"
+          
+          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+            echo "  - Shortcut FE 加速"
+            echo "  - 自动替换firewall4、libnftnl、nftables"
+            echo "  - 应用952、613、953补丁"
           else
-            echo "❌ $(basename $comp) 缺失"
+            echo "  - 无 SFE 加速"
+            echo "  - 自动替换firewall4、libnftnl、nftables"  
+            echo "  - 应用952补丁"
           fi
-        done
+          
+        else
+          echo "🎯 完整LEDE Fullcone NAT方案配置:"
+          echo "  - BCM Fullcone NAT 内核补丁 (最高性能)"
+          echo "  - nftables fullcone 独立表达式"
+          echo "  - iptables FULLCONENAT 传统目标"
+          echo "  - 双重防火墙支持 (firewall3 + firewall4)"
+          echo "  - 完整内核模块生态"
+          
+          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+            echo "  - Shortcut FE 加速"
+          else
+            echo "  - 无 SFE 加速"
+          fi
+        fi
         
         echo ""
-        echo "Fullcone NAT 配置状态:"
-        echo "BCM 内核补丁: $(grep "CONFIG_PACKAGE_kmod-nft-fullcone" .config || echo "未配置")"
-        echo "nftables Fullcone: $(grep "CONFIG_PACKAGE_nftables" .config || echo "未配置")"
-        echo "iptables Fullcone: $(grep "CONFIG_PACKAGE_iptables-mod-fullconenat" .config || echo "未配置")"
-        echo "firewall4: $(grep "CONFIG_PACKAGE_firewall4" .config || echo "未配置")"
+        echo "TurboACC组件状态:"
+        echo "luci-app-turboacc: $(grep "CONFIG_PACKAGE_luci-app-turboacc" .config || echo "未配置")"
+        echo "nft-fullcone: $(grep "CONFIG_PACKAGE_kmod-nft-fullcone" .config || echo "未配置")"
         
-        echo ""
-        echo "🎯 LEDE Fullcone NAT 技术栈:"
-        echo "  - BCM 内核级 Fullcone NAT (最高性能)"
-        echo "  - nftables fullcone 表达式支持"
-        echo "  - iptables FULLCONENAT 传统支持"
-        echo "  - 双重防火墙支持 (firewall3 + firewall4)"
-        echo "  - 完整的内核模块生态"
+        if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+          echo "Shortcut FE: $(grep "CONFIG_PACKAGE_kmod-shortcut-fe" .config || echo "未配置")"
+        fi
 
     - name: 修复常见问题
       run: |
@@ -394,30 +428,36 @@ jobs:
       run: |
         echo "=== 生成版本信息 ==="
         {
-          echo "固件版本: OpenWrt SNAPSHOT (完整 LEDE Fullcone NAT 支持)"
-          echo "内核版本: 6.6 (带 BCM Fullcone 补丁)"
+          echo "固件版本: OpenWrt SNAPSHOT"
+          echo "内核版本: 6.12 (带 Fullcone NAT 补丁)"
           echo "编译时间: $(date '+%Y-%m-%d %H:%M:%S')"
           echo "目标设备: ${{ github.event.inputs.target_device }}"
           echo "编译模式: ${{ github.event.inputs.build_mode }}"
+          echo "TurboACC方案: ${{ github.event.inputs.turboacc_method }}"
           echo ""
-          echo "🎯 Fullcone NAT 技术特性:"
-          echo "  - BCM Fullcone NAT 内核补丁 (最高性能)"
-          echo "  - nftables fullcone 独立表达式"
-          echo "  - iptables FULLCONENAT 传统目标"
-          echo "  - 双重防火墙支持"
-          echo "  - 完整内核模块生态"
+          
+          if [ "${{ github.event.inputs.turboacc_method }}" = "script" ]; then
+            echo "🎯 TurboACC脚本方案特性:"
+            echo "  - luci-app-turboacc Web管理界面"
+            echo "  - nft-fullcone Fullcone NAT支持"
+            if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+              echo "  - Shortcut FE 网络加速"
+              echo "  - 自动组件替换和补丁应用"
+            fi
+          else
+            echo "🎯 完整LEDE Fullcone NAT方案特性:"
+            echo "  - BCM Fullcone NAT 内核补丁"
+            echo "  - nftables fullcone 表达式"
+            echo "  - iptables FULLCONENAT 目标"
+            echo "  - 双重防火墙支持"
+            if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
+              echo "  - Shortcut FE 网络加速"
+            fi
+          fi
+          
           echo ""
           echo "包含功能:"
           echo "  - 全内核模块支持"
-          echo "  - 完整 Fullcone NAT 技术栈"
-          echo "  - firewall4 + nftables (现代)"
-          echo "  - firewall3 + iptables (传统)"
-          
-          if [ "${{ github.event.inputs.include_sfe }}" = "true" ]; then
-            echo "  - Shortcut FE 加速"
-          else
-            echo "  - 无 SFE 加速"
-          fi
           
           if [ "${{ github.event.inputs.include_istore }}" = "true" ]; then
             echo "  - iStore 应用商店"
@@ -432,7 +472,7 @@ jobs:
 
     - name: 编译固件
       run: |
-        echo "=== 开始编译（完整 LEDE Fullcone NAT 支持）==="
+        echo "=== 开始编译 ==="
         
         # 设置线程数
         if [ "${{ github.event.inputs.compile_threads }}" = "multi" ]; then
@@ -499,7 +539,7 @@ jobs:
     - name: 上传固件
       uses: actions/upload-artifact@v4
       with:
-        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
+        name: firmware-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}-${{ github.event.inputs.turboacc_method }}
         path: upload/firmware/
         retention-days: 30
         if-no-files-found: warn
@@ -507,7 +547,7 @@ jobs:
     - name: 上传软件包
       uses: actions/upload-artifact@v4
       with:
-        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
+        name: packages-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}-${{ github.event.inputs.turboacc_method }}
         path: upload/packages/
         retention-days: 30
         if-no-files-found: warn
@@ -516,7 +556,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}
+        name: build-info-${{ github.event.inputs.target_device }}-${{ github.event.inputs.build_mode }}-${{ github.event.inputs.turboacc_method }}
         path: upload/
         retention-days: 7
         if-no-files-found: warn
