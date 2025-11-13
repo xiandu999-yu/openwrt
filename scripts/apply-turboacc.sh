@@ -7,9 +7,11 @@ set -e
 
 echo "=== 应用 TurboACC 加速方案 ==="
 
-# 参数
-TURBOACC_METHOD=$1
-INCLUDE_SFE=$2
+# 参数处理
+TURBOACC_METHOD=${1:-"immortalwrt"}  # 默认值
+INCLUDE_SFE=${2:-"true"}              # 默认值
+
+echo "参数: TURBOACC_METHOD=$TURBOACC_METHOD, INCLUDE_SFE=$INCLUDE_SFE"
 
 apply_script_solution() {
     echo "应用脚本方案 TurboACC..."
@@ -17,10 +19,12 @@ apply_script_solution() {
     if [ "$INCLUDE_SFE" = "true" ]; then
         echo "安装完整TurboACC (包含SFE)"
         curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+        chmod +x add_turboacc.sh
         bash add_turboacc.sh
     else
         echo "安装TurboACC (不包含SFE)"
         curl -sSL https://raw.githubusercontent.com/chenmozhijin/turboacc/luci/add_turboacc.sh -o add_turboacc.sh
+        chmod +x add_turboacc.sh
         bash add_turboacc.sh --no-sfe
     fi
     
@@ -39,11 +43,12 @@ main() {
         "script")
             apply_script_solution
             ;;
-        "immortalwrt")
+        "immortalwrt"|"")
             apply_immortalwrt_solution
             ;;
         *)
             echo "❌ 未知的 TurboACC 方案: $TURBOACC_METHOD"
+            echo "可用方案: script, immortalwrt"
             exit 1
             ;;
     esac
