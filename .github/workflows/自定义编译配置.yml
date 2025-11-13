@@ -1,8 +1,6 @@
-name: OpenWrt 完整编译（修复版）
+name: OpenWrt 完整编译（支持所有方案）
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       target_device:
@@ -13,41 +11,30 @@ on:
         options:
           - nanopi-r3s
           - nanopi-r6s
-      include_sfe:
-        description: '包含SFE加速'
-        type: boolean
-        required: false
-        default: true
-      compile_threads:
-        description: '编译线程数'
-        required: false
-        default: 'single'  # 改为单线程更稳定
-        type: choice
-        options:
-          - single
-          - multi
-      build_mode:
-        description: '编译模式'
-        required: false
-        default: 'firmware'  # 改为固件模式节省空间
-        type: choice
-        options:
-          - firmware
-          - full
-      include_istore:
-        description: '包含iStore应用商店'
-        type: boolean
-        required: false
-        default: false  # 默认关闭以节省空间
       turboacc_method:
         description: '加速方案'
         required: false
-        default: 'immortalwrt'
+        default: 'hybrid'
         type: choice
         options:
           - immortalwrt
           - hybrid
           - script
+      enable_turboacc_ui:
+        description: '启用TurboACC Web界面'
+        type: boolean
+        required: false
+        default: true
+      include_sfe:
+        description: '包含SFE加速'
+        type: boolean
+        required: false
+        default: true
+      include_istore:
+        description: '包含iStore应用商店'
+        type: boolean
+        required: false
+        default: false
 
 env:
   TIMEOUT: 360m
