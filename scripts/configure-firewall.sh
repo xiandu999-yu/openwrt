@@ -7,11 +7,13 @@ set -e
 
 echo "=== 配置 TurboACC 防火墙功能 ==="
 
-# 参数
-TURBOACC_METHOD=$1
-INCLUDE_SFE=$2
-BUILD_MODE=$3
-INCLUDE_ISTORE=$4
+# 参数处理
+TURBOACC_METHOD=${1:-"immortalwrt"}  # 默认值
+INCLUDE_SFE=${2:-"true"}              # 默认值
+BUILD_MODE=${3:-"firmware"}           # 默认值
+INCLUDE_ISTORE=${4:-"true"}           # 默认值
+
+echo "参数: TURBOACC_METHOD=$TURBOACC_METHOD, INCLUDE_SFE=$INCLUDE_SFE, BUILD_MODE=$BUILD_MODE, INCLUDE_ISTORE=$INCLUDE_ISTORE"
 
 configure_script_solution() {
     echo "配置脚本方案的 TurboACC..."
@@ -126,11 +128,12 @@ main() {
         "script")
             configure_script_solution
             ;;
-        "immortalwrt")
+        "immortalwrt"|"")
             configure_immortalwrt_solution
             ;;
         *)
             echo "❌ 未知的 TurboACC 方案: $TURBOACC_METHOD"
+            echo "可用方案: script, immortalwrt"
             exit 1
             ;;
     esac
